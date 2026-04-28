@@ -46,7 +46,8 @@ class App
         // Redirect all UI routes to /upgrade while an upgrade is in progress
         $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
         if (!str_starts_with($path, '/upgrade') && !str_starts_with($path, '/api/')
-            && !str_starts_with($path, '/login') && !str_starts_with($path, '/logout')) {
+            && !str_starts_with($path, '/login') && !str_starts_with($path, '/logout')
+            && !str_starts_with($path, '/branding/') && $path !== '/favicon.ico') {
             try {
                 $db = Database::getInstance();
                 $row = $db->fetchOne("SELECT `value` FROM settings WHERE `key` = 'upgrade_in_progress'");
@@ -176,6 +177,10 @@ class App
         $this->router->map('POST', '/settings/docker-setup', 'SettingsController@dockerSetup');
         $this->router->map('POST', '/settings/test-smtp', 'SettingsController@testSmtp');
         $this->router->map('POST', '/settings/check-update', 'SettingsController@checkUpdate');
+        $this->router->map('GET', '/branding/favicon/[i:size]', 'SettingsController@favicon');
+        $this->router->map('GET', '/branding/favicon.ico', 'SettingsController@faviconIco');
+        $this->router->map('GET', '/branding/manifest', 'SettingsController@manifest');
+        $this->router->map('GET', '/favicon.ico', 'SettingsController@faviconIco');
 
         // Storage Locations
         $this->router->map('GET', '/storage-locations', 'StorageLocationController@index');

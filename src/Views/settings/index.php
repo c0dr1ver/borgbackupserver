@@ -1549,56 +1549,40 @@ document.getElementById('oidcNewUserPolicy').addEventListener('change', function
 
         <form method="POST" action="/settings/branding" enctype="multipart/form-data" id="brandingForm">
             <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
+            <input type="hidden" name="branding_logo_data" id="brandingLogoData">
             <input type="hidden" name="branding_icon_data" id="brandingIconData">
-            <input type="hidden" name="branding_login_logo_data" id="brandingLoginLogoData">
+            <input type="hidden" name="branding_favicon_data" id="brandingFaviconData">
+            <input type="hidden" name="branding_favicon_ico_data" id="brandingFaviconIcoData">
 
-            <!-- Navbar Icon -->
             <div class="row mb-4">
                 <div class="col-md-8">
-                    <h6><i class="bi bi-image me-1"></i> Navbar Icon</h6>
-                    <p class="text-muted small">Square transparent PNG shown in the top-left corner. Will be resized to 120x120px max.</p>
-                    <input type="file" class="form-control form-control-sm" id="iconFileInput" accept="image/png">
-                    <div class="small text-muted mt-1" id="iconDimensions"></div>
-                    <?php if (!empty($settings['branding_icon'])): ?>
+                    <h6><i class="bi bi-image me-1"></i> Brand Logo</h6>
+                    <p class="text-muted small">Upload one PNG. BBS will create the navbar icon, login logo, browser favicons, Apple touch icon, and manifest icons.</p>
+                    <input type="file" class="form-control form-control-sm" id="brandLogoFileInput" accept="image/png">
+                    <div class="small text-muted mt-1" id="brandLogoDimensions"></div>
+                    <?php if (!empty($settings['branding_icon']) || !empty($settings['branding_login_logo'])): ?>
                     <div class="form-check mt-2">
                         <input class="form-check-input" type="checkbox" name="remove_branding_icon" value="1" id="removeBrandingIcon">
-                        <label class="form-check-label small" for="removeBrandingIcon">Remove custom icon (revert to default)</label>
+                        <label class="form-check-label small" for="removeBrandingIcon">Remove custom navbar icon and favicons</label>
                     </div>
-                    <?php endif; ?>
-                </div>
-                <div class="col-md-4 text-center">
-                    <label class="form-label small text-muted">Preview</label>
-                    <div class="p-3 rounded <?= ($_SESSION['theme'] ?? 'dark') === 'dark' ? 'bg-dark' : 'bg-body-secondary' ?>">
-                        <img id="iconPreview" src="<?= !empty($settings['branding_icon']) ? 'data:image/png;base64,' . $settings['branding_icon'] : '/images/borg_icon_dark.png' ?>" alt="Icon preview" style="height: 36px;">
-                        <?php if (empty($settings['branding_icon'])): ?>
-                        <div class="text-muted small mt-1" id="iconDefaultLabel">Default</div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-
-            <hr>
-
-            <!-- Login Logo -->
-            <div class="row mb-4">
-                <div class="col-md-8">
-                    <h6><i class="bi bi-card-image me-1"></i> Login Page Logo</h6>
-                    <p class="text-muted small">Transparent PNG displayed on the login page. Will be resized to fit within 475 x 100 pixels.</p>
-                    <input type="file" class="form-control form-control-sm" id="loginLogoFileInput" accept="image/png">
-                    <div class="small text-muted mt-1" id="loginLogoDimensions"></div>
-                    <?php if (!empty($settings['branding_login_logo'])): ?>
                     <div class="form-check mt-2">
                         <input class="form-check-input" type="checkbox" name="remove_branding_login_logo" value="1" id="removeLoginLogo">
-                        <label class="form-check-label small" for="removeLoginLogo">Remove custom logo (revert to default)</label>
+                        <label class="form-check-label small" for="removeLoginLogo">Remove custom login logo</label>
                     </div>
                     <?php endif; ?>
                 </div>
-                <div class="col-md-4 text-center">
-                    <label class="form-label small text-muted">Preview</label>
+                <div class="col-md-4">
+                    <label class="form-label small text-muted">Previews</label>
                     <div class="p-3 rounded <?= ($_SESSION['theme'] ?? 'dark') === 'dark' ? 'bg-dark' : 'bg-body-secondary' ?>">
-                        <img id="loginLogoPreview" src="<?= !empty($settings['branding_login_logo']) ? 'data:image/png;base64,' . $settings['branding_login_logo'] : '/images/borg_icon_dark.png' ?>" alt="Login logo preview" style="<?= !empty($settings['branding_login_logo']) ? 'max-width:300px;max-height:80px;' : 'max-width:80px;' ?>">
+                        <div class="d-flex align-items-center justify-content-center gap-3 mb-3">
+                            <img id="iconPreview" src="<?= !empty($settings['branding_icon']) ? 'data:image/png;base64,' . $settings['branding_icon'] : '/images/borg_icon_dark.png' ?>" alt="Navbar icon preview" style="height: 36px;">
+                            <img id="faviconPreview" src="<?= !empty($settings['branding_favicon_32']) ? 'data:image/png;base64,' . $settings['branding_favicon_32'] : '/images/borg_icon_dark.png' ?>" alt="Favicon preview" style="width: 32px; height: 32px;">
+                        </div>
+                        <div class="text-center">
+                            <img id="loginLogoPreview" src="<?= !empty($settings['branding_login_logo']) ? 'data:image/png;base64,' . $settings['branding_login_logo'] : '/images/borg_icon_dark.png' ?>" alt="Login logo preview" style="<?= !empty($settings['branding_login_logo']) ? 'max-width:300px;max-height:80px;' : 'max-width:80px;' ?>">
+                        </div>
                         <?php if (empty($settings['branding_login_logo'])): ?>
-                        <div class="text-muted small mt-1" id="loginLogoDefaultLabel">Default</div>
+                        <div class="text-muted small mt-2 text-center" id="brandDefaultLabel">Default</div>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -1625,53 +1609,127 @@ document.getElementById('oidcNewUserPolicy').addEventListener('change', function
     </div>
 </div>
 <script>
-function resizeImage(file, maxW, maxH, callback) {
+function loadImageFile(file, callback) {
     var reader = new FileReader();
     reader.onload = function(e) {
         var img = new Image();
         img.onload = function() {
-            var w = img.width, h = img.height;
-            if (w <= maxW && h <= maxH) {
-                // Already within limits, use original
-                callback(e.target.result, w, h);
-                return;
-            }
-            var ratio = Math.min(maxW / w, maxH / h);
-            var nw = Math.round(w * ratio), nh = Math.round(h * ratio);
-            var canvas = document.createElement('canvas');
-            canvas.width = nw;
-            canvas.height = nh;
-            var ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, nw, nh);
-            callback(canvas.toDataURL('image/png'), nw, nh);
+            callback(img);
         };
         img.src = e.target.result;
     };
     reader.readAsDataURL(file);
 }
 
-document.getElementById('iconFileInput').addEventListener('change', function() {
-    if (!this.files[0]) return;
-    resizeImage(this.files[0], 120, 120, function(dataUrl, w, h) {
-        document.getElementById('iconPreview').src = dataUrl;
-        document.getElementById('iconPreview').style.height = '36px';
-        document.getElementById('brandingIconData').value = dataUrl.split(',')[1];
-        document.getElementById('iconDimensions').textContent = 'Resized to ' + w + 'x' + h + 'px';
-        var lbl = document.getElementById('iconDefaultLabel');
-        if (lbl) lbl.style.display = 'none';
-    });
-});
+function renderContainedPng(img, width, height, options) {
+    options = options || {};
+    var padding = options.padding || 0;
+    var canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    var ctx = canvas.getContext('2d');
 
-document.getElementById('loginLogoFileInput').addEventListener('change', function() {
+    if (options.background) {
+        ctx.fillStyle = options.background;
+        ctx.fillRect(0, 0, width, height);
+    }
+
+    var maxW = width - padding * 2;
+    var maxH = height - padding * 2;
+    var ratio = Math.min(maxW / img.width, maxH / img.height, 1);
+    var drawW = Math.max(1, Math.round(img.width * ratio));
+    var drawH = Math.max(1, Math.round(img.height * ratio));
+    var x = Math.round((width - drawW) / 2);
+    var y = Math.round((height - drawH) / 2);
+    ctx.drawImage(img, x, y, drawW, drawH);
+
+    return {
+        dataUrl: canvas.toDataURL('image/png'),
+        width: drawW,
+        height: drawH
+    };
+}
+
+function base64ToBytes(base64) {
+    var binary = atob(base64);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+}
+
+function bytesToBase64(bytes) {
+    var binary = '';
+    var chunkSize = 0x8000;
+    for (var i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+}
+
+function createIcoBase64(pngs) {
+    var entries = [16, 32, 48].map(function(size) {
+        return {size: size, bytes: base64ToBytes(pngs[size])};
+    });
+    var headerSize = 6 + entries.length * 16;
+    var totalSize = headerSize + entries.reduce(function(sum, entry) {
+        return sum + entry.bytes.length;
+    }, 0);
+    var buffer = new ArrayBuffer(totalSize);
+    var view = new DataView(buffer);
+    var out = new Uint8Array(buffer);
+    var offset = headerSize;
+
+    view.setUint16(0, 0, true);
+    view.setUint16(2, 1, true);
+    view.setUint16(4, entries.length, true);
+
+    entries.forEach(function(entry, index) {
+        var dir = 6 + index * 16;
+        view.setUint8(dir, entry.size);
+        view.setUint8(dir + 1, entry.size);
+        view.setUint8(dir + 2, 0);
+        view.setUint8(dir + 3, 0);
+        view.setUint16(dir + 4, 1, true);
+        view.setUint16(dir + 6, 32, true);
+        view.setUint32(dir + 8, entry.bytes.length, true);
+        view.setUint32(dir + 12, offset, true);
+        out.set(entry.bytes, offset);
+        offset += entry.bytes.length;
+    });
+
+    return bytesToBase64(out);
+}
+
+document.getElementById('brandLogoFileInput').addEventListener('change', function() {
     if (!this.files[0]) return;
-    resizeImage(this.files[0], 475, 100, function(dataUrl, w, h) {
-        var preview = document.getElementById('loginLogoPreview');
-        preview.src = dataUrl;
-        preview.style.maxWidth = '300px';
-        preview.style.maxHeight = '80px';
-        document.getElementById('brandingLoginLogoData').value = dataUrl.split(',')[1];
-        document.getElementById('loginLogoDimensions').textContent = 'Resized to ' + w + 'x' + h + 'px';
-        var lbl = document.getElementById('loginLogoDefaultLabel');
+    loadImageFile(this.files[0], function(img) {
+        var login = renderContainedPng(img, Math.min(img.width, 475), Math.min(img.height, 100));
+        if (img.width > 475 || img.height > 100) {
+            login = renderContainedPng(img, 475, 100);
+        }
+        var icon = renderContainedPng(img, 120, 120, {padding: 10});
+        var favicons = {};
+        [16, 32, 48, 96, 180, 192, 512].forEach(function(size) {
+            favicons[size] = renderContainedPng(img, size, size, {
+                padding: Math.max(0, Math.round(size * 0.12)),
+                background: size >= 180 ? '#1a1d21' : null
+            }).dataUrl.split(',')[1];
+        });
+
+        document.getElementById('loginLogoPreview').src = login.dataUrl;
+        document.getElementById('loginLogoPreview').style.maxWidth = '300px';
+        document.getElementById('loginLogoPreview').style.maxHeight = '80px';
+        document.getElementById('iconPreview').src = icon.dataUrl;
+        document.getElementById('faviconPreview').src = renderContainedPng(img, 32, 32, {padding: 4}).dataUrl;
+        document.getElementById('brandingLogoData').value = login.dataUrl.split(',')[1];
+        document.getElementById('brandingIconData').value = icon.dataUrl.split(',')[1];
+        document.getElementById('brandingFaviconData').value = JSON.stringify(favicons);
+        document.getElementById('brandingFaviconIcoData').value = createIcoBase64(favicons);
+        document.getElementById('brandLogoDimensions').textContent =
+            'Generated navbar 120x120, login ' + login.width + 'x' + login.height + ', favicon.ico, favicons 16/32/48/96/180/192/512.';
+        var lbl = document.getElementById('brandDefaultLabel');
         if (lbl) lbl.style.display = 'none';
     });
 });

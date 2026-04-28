@@ -239,15 +239,48 @@ class SettingsController extends Controller
 
         $saved = [];
 
+        $faviconSizes = [16, 32, 48, 96, 180, 192, 512];
+
+        if (!empty($_POST['branding_logo_data'])) {
+            $data = $_POST['branding_logo_data'];
+            if ($this->isBase64Png($data)) {
+                $this->saveSetting('branding_login_logo', $data);
+                $saved[] = 'Login logo updated';
+            }
+        }
+
+        if (!empty($_POST['branding_favicon_data'])) {
+            $faviconData = json_decode($_POST['branding_favicon_data'], true);
+            if (is_array($faviconData)) {
+                foreach ($faviconSizes as $size) {
+                    $key = (string) $size;
+                    if (!empty($faviconData[$key]) && is_string($faviconData[$key]) && $this->isBase64Png($faviconData[$key])) {
+                        $this->saveSetting('branding_favicon_' . $size, $faviconData[$key]);
+                    }
+                }
+                $saved[] = 'Favicons updated';
+            }
+        }
+
+        if (!empty($_POST['branding_favicon_ico_data'])) {
+            $icoData = $_POST['branding_favicon_ico_data'];
+            if ($this->isBase64Ico($icoData)) {
+                $this->saveSetting('branding_favicon_ico', $icoData);
+            }
+        }
+
         // Handle navbar icon
         if (!empty($_POST['remove_branding_icon'])) {
             $this->db->query("DELETE FROM settings WHERE `key` = 'branding_icon'");
+            foreach ($faviconSizes as $size) {
+                $this->db->query("DELETE FROM settings WHERE `key` = ?", ['branding_favicon_' . $size]);
+            }
+            $this->db->query("DELETE FROM settings WHERE `key` = 'branding_favicon_ico'");
             $saved[] = 'Navbar icon removed';
+            $saved[] = 'Favicons removed';
         } elseif (!empty($_POST['branding_icon_data'])) {
             $data = $_POST['branding_icon_data'];
-            // Validate it's valid base64 PNG
-            $decoded = base64_decode($data, true);
-            if ($decoded && substr($decoded, 0, 4) === "\x89PNG") {
+            if ($this->isBase64Png($data)) {
                 $this->saveSetting('branding_icon', $data);
                 $saved[] = 'Navbar icon updated';
             }
@@ -259,8 +292,7 @@ class SettingsController extends Controller
             $saved[] = 'Login logo removed';
         } elseif (!empty($_POST['branding_login_logo_data'])) {
             $data = $_POST['branding_login_logo_data'];
-            $decoded = base64_decode($data, true);
-            if ($decoded && substr($decoded, 0, 4) === "\x89PNG") {
+            if ($this->isBase64Png($data)) {
                 $this->saveSetting('branding_login_logo', $data);
                 $saved[] = 'Login logo updated';
             }
@@ -273,8 +305,93 @@ class SettingsController extends Controller
             $saved[] = 'Login theme updated';
         }
 
+        if (!empty($saved)) {
+            $this->saveSetting('branding_version', (string) time());
+        }
+
         $this->flash('success', !empty($saved) ? implode('. ', $saved) . '.' : 'Branding saved.');
         $this->redirect('/settings?tab=branding');
+    }
+
+    public function favicon(int $size): void
+    {
+        $allowed = [16, 32, 48, 96, 180, 192, 512];
+        if (!in_array($size, $allowed, true)) {
+            http_response_code(404);
+            echo 'Not Found';
+            return;
+        }
+
+        $row = $this->db->fetchOne("SELECT `value` FROM settings WHERE `key` = ?", ['branding_favicon_' . $size]);
+        $png = null;
+        if (!empty($row['value']) && $this->isBase64Png($row['value'])) {
+            $png = base64_decode($row['value']);
+        }
+
+        if ($png === null) {
+            $fallback = $this->defaultFaviconPath($size);
+            if (!$fallback || !is_file($fallback)) {
+                http_response_code(404);
+                echo 'Not Found';
+                return;
+            }
+            $png = file_get_contents($fallback);
+        }
+
+        header('Content-Type: image/png');
+        header('Cache-Control: public, max-age=3600');
+        echo $png;
+    }
+
+    public function faviconIco(): void
+    {
+        $row = $this->db->fetchOne("SELECT `value` FROM settings WHERE `key` = 'branding_favicon_ico'");
+        if (!empty($row['value']) && $this->isBase64Ico($row['value'])) {
+            header('Content-Type: image/x-icon');
+            header('Cache-Control: public, max-age=3600');
+            echo base64_decode($row['value']);
+            return;
+        }
+
+        $fallback = $this->defaultFaviconPath(32);
+        if (!$fallback || !is_file($fallback)) {
+            http_response_code(404);
+            echo 'Not Found';
+            return;
+        }
+
+        header('Content-Type: image/png');
+        header('Cache-Control: public, max-age=3600');
+        echo file_get_contents($fallback);
+    }
+
+    public function manifest(): void
+    {
+        $versionRow = $this->db->fetchOne("SELECT `value` FROM settings WHERE `key` = 'branding_version'");
+        $version = urlencode($versionRow['value'] ?? 'default');
+
+        header('Content-Type: application/manifest+json');
+        header('Cache-Control: public, max-age=3600');
+        echo json_encode([
+            'name' => 'Borg Backup Server',
+            'short_name' => 'BBS',
+            'start_url' => '/',
+            'display' => 'standalone',
+            'background_color' => '#1a1d21',
+            'theme_color' => '#2c3e50',
+            'icons' => [
+                [
+                    'src' => '/branding/favicon/192?v=' . $version,
+                    'sizes' => '192x192',
+                    'type' => 'image/png',
+                ],
+                [
+                    'src' => '/branding/favicon/512?v=' . $version,
+                    'sizes' => '512x512',
+                    'type' => 'image/png',
+                ],
+            ],
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
     }
 
     public function createApiToken(): void
@@ -327,6 +444,36 @@ class SettingsController extends Controller
         } else {
             $this->db->insert('settings', ['key' => $key, 'value' => $value]);
         }
+    }
+
+    private function isBase64Png(string $data): bool
+    {
+        $decoded = base64_decode($data, true);
+        return $decoded !== false && substr($decoded, 0, 8) === "\x89PNG\r\n\x1a\n";
+    }
+
+    private function isBase64Ico(string $data): bool
+    {
+        $decoded = base64_decode($data, true);
+        if ($decoded === false || strlen($decoded) < 6) {
+            return false;
+        }
+
+        $header = unpack('vreserved/vtype/vcount', substr($decoded, 0, 6));
+        return ($header['reserved'] ?? null) === 0
+            && ($header['type'] ?? null) === 1
+            && ($header['count'] ?? 0) > 0;
+    }
+
+    private function defaultFaviconPath(int $size): ?string
+    {
+        $publicDir = dirname(__DIR__, 2) . '/public';
+        return match ($size) {
+            180 => $publicDir . '/images/apple-touch-icon.png',
+            192 => $publicDir . '/images/icon-192.png',
+            512 => $publicDir . '/images/icon-512.png',
+            default => $publicDir . '/images/borg_icon_dark.png',
+        };
     }
 
     public function agentUpdatesJson(): void

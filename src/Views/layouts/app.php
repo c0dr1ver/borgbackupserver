@@ -8,8 +8,17 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link href="/css/style.css?v=<?= filemtime(__DIR__ . '/../../../public/css/style.css') ?>" rel="stylesheet">
-    <link rel="manifest" href="/manifest.json">
-    <link rel="apple-touch-icon" href="/images/apple-touch-icon.png">
+    <?php
+        $brandingVersionRow = \BBS\Core\Database::getInstance()->fetchOne("SELECT `value` FROM settings WHERE `key` = 'branding_version'");
+        $brandingVersion = urlencode($brandingVersionRow['value'] ?? 'default');
+    ?>
+    <link rel="icon" href="/branding/favicon.ico?v=<?= $brandingVersion ?>">
+    <link rel="icon" type="image/png" sizes="16x16" href="/branding/favicon/16?v=<?= $brandingVersion ?>">
+    <link rel="icon" type="image/png" sizes="32x32" href="/branding/favicon/32?v=<?= $brandingVersion ?>">
+    <link rel="icon" type="image/png" sizes="48x48" href="/branding/favicon/48?v=<?= $brandingVersion ?>">
+    <link rel="icon" type="image/png" sizes="96x96" href="/branding/favicon/96?v=<?= $brandingVersion ?>">
+    <link rel="apple-touch-icon" sizes="180x180" href="/branding/favicon/180?v=<?= $brandingVersion ?>">
+    <link rel="manifest" href="/branding/manifest?v=<?= $brandingVersion ?>">
     <meta name="theme-color" content="#2c3e50">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
