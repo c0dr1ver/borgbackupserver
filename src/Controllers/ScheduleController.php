@@ -216,7 +216,7 @@ class ScheduleController extends Controller
         if (!empty($planIds)) {
             $placeholders = implode(',', array_fill(0, count($planIds), '?'));
             $rows = $this->db->fetchAll("
-                SELECT backup_plan_id, status, completed_at
+                SELECT id, backup_plan_id, status, completed_at
                 FROM backup_jobs
                 WHERE backup_plan_id IN ({$placeholders})
                   AND task_type = 'backup'
@@ -228,6 +228,7 @@ class ScheduleController extends Controller
                 $pid = (int) $r['backup_plan_id'];
                 if (!isset($latestJobs[$pid])) {
                     $latestJobs[$pid] = [
+                        'id' => (int) $r['id'],
                         'status' => $r['status'],
                         'completed_at' => $r['completed_at'],
                     ];
@@ -319,6 +320,7 @@ class ScheduleController extends Controller
                         'time_label' => $is24h ? $schedDate->format('H:i') : $schedDate->format('g:i A'),
                         'scheduled_at_utc' => (clone $schedDate)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'),
                         'job_status' => null,
+                        'failed_job_id' => null,
                         'has_error' => false,
                     ];
                 }
@@ -342,6 +344,7 @@ class ScheduleController extends Controller
 
             if ($bestIdx !== null) {
                 $blocks[$bestIdx]['job_status'] = 'failed';
+                $blocks[$bestIdx]['failed_job_id'] = (int) $job['id'];
                 $blocks[$bestIdx]['has_error'] = true;
             }
         }
