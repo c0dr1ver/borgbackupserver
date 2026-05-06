@@ -155,6 +155,7 @@ function bbs_histogram_ticks(int $max): array
 }
 .hist-container {
     --hist-axis-offset: 56px;
+    --timeline-block-min-width: 46px;
     position: relative;
     height: 170px;
     display: block;
@@ -253,6 +254,7 @@ function bbs_histogram_ticks(int $max): array
     flex: 1 1 0;
     min-height: 6px;
     cursor: pointer;
+    touch-action: manipulation;
     background:
         linear-gradient(90deg, var(--agent-accent), rgba(255, 255, 255, 0.24) 8%, transparent 26%),
         linear-gradient(180deg, var(--schedule-laser-hot), var(--schedule-block-bg));
@@ -284,7 +286,7 @@ function bbs_histogram_ticks(int $max): array
 .hist-event {
     position: absolute;
     height: 24px;
-    min-width: var(--timeline-block-min-width, 46px);
+    min-width: var(--timeline-block-min-width);
     padding: 0;
     border-radius: 5px;
     border-left: 3px solid var(--agent-accent);
@@ -334,6 +336,7 @@ function bbs_histogram_ticks(int $max): array
         repeating-linear-gradient(45deg, var(--schedule-concrete-line) 0 1px, transparent 1px 6px),
         linear-gradient(180deg, var(--schedule-concrete-bg), var(--schedule-concrete-bg-2));
     border-left: 5px solid var(--agent-accent);
+    z-index: -1;
 }
 .hist-seg.is-error.is-past {
     background: var(--schedule-error-cracked);
@@ -813,6 +816,20 @@ function bbs_histogram_ticks(int $max): array
     }
 }
 
+/* Tablet/medium: keep backup timeline blocks proportional without the desktop minimum. */
+@media (min-width: 768px) and (max-width: 1199.98px) {
+    .hist-container {
+        --hist-axis-offset: 0px;
+        --timeline-block-min-width: 1px;
+    }
+    .hist-timeline-axis {
+        display: none;
+    }
+    .hist-event {
+        min-width: var(--timeline-block-min-width, 1px);
+    }
+}
+
 /* Phone-only: keep the backup timeline compact; tablets retain labels/axis. */
 @media (max-width: 575.98px) {
     .hist-container {
@@ -920,10 +937,17 @@ function bbs_histogram_ticks(int $max): array
                     <?php foreach ($blocksByDay[$dIdx] as $b): ?>
                         <?php
                         $startPct = max(0, min(100, ($b['start_min'] / 1440) * 100));
-                        $durationPct = max(0.25, min(100, ($b['duration_min'] / 1440) * 100));
+                        $actualDurationPct = max(0.001, min(100, ($b['duration_min'] / 1440) * 100));
+                        $durationPct = max(0.25, $actualDurationPct);
                         $laneTop = (int) ($b['lane'] ?? 0) * 30;
                         $timelinePastPct = bbs_schedule_progress_pct((int) $b['day_idx'], (int) $b['start_min'], (int) $b['duration_min'], $todayIdx, $currentMinuteOfDay);
                         $timelinePhase = bbs_day_block_phase($timelinePastPct);
+                        $timelineWidthPct = ((int) $b['day_idx'] === $todayIdx && $timelinePhase !== 'future')
+                            ? $actualDurationPct
+                            : $durationPct;
+                        $timelineMinWidth = ((int) $b['day_idx'] === $todayIdx && $timelinePhase !== 'future')
+                            ? '0px'
+                            : null;
                         $timelineIsError = !empty($b['has_error']);
                         $timelineDurLabel = $b['duration_min'] >= 60
                             ? floor($b['duration_min'] / 60) . 'h ' . ($b['duration_min'] % 60) . 'm'
@@ -939,7 +963,7 @@ function bbs_histogram_ticks(int $max): array
                              data-frequency="<?= htmlspecialchars($b['frequency']) ?>"
                              data-job-status="<?= htmlspecialchars($b['job_status'] ?? '') ?>"
                              data-failed-job-id="<?= (int) ($b['failed_job_id'] ?? 0) ?>"
-                             style="top: <?= $laneTop ?>px; left: <?= round($startPct, 4) ?>%; width: max(var(--timeline-block-min-width, 46px), <?= round($durationPct, 4) ?>%); max-width: calc(100% - <?= round($startPct, 4) ?>%); --agent-accent: <?= bbs_agent_color((int) $b['agent_id']) ?>; --past-pct: <?= round($timelinePastPct, 2) ?>%;">
+                             style="top: <?= $laneTop ?>px; left: <?= round($startPct, 4) ?>%; width: max(var(--timeline-block-min-width), <?= round($timelineWidthPct, 4) ?>%); max-width: calc(100% - <?= round($startPct, 4) ?>%); --agent-accent: <?= bbs_agent_color((int) $b['agent_id']) ?>; --past-pct: <?= round($timelinePastPct, 2) ?>%;<?= $timelineMinWidth !== null ? ' --timeline-block-min-width: ' . $timelineMinWidth . ';' : '' ?>">
                         </div>
                     <?php endforeach; ?>
                     <?php if (empty($blocksByDay[$dIdx])): ?>
@@ -1268,7 +1292,7 @@ document.addEventListener('DOMContentLoaded', function () {
             'Est. duration: <strong>' + esc(el.dataset.duration || '') + '</strong>' +
             (el.dataset.jobStatus === 'failed' ? '<br>Result: <strong>Error</strong>' : '') +
             (el.dataset.estimated === '1' ? ' <span style="opacity:.6">(no history — default)</span>' : '') +
-            '<div class="tt-hint">' + (isMobileScheduleMode() && el.classList.contains('day-block') ? 'Long press for options' : 'Click for options') + '</div>';
+            '<div class="tt-hint">' + (isMobileScheduleMode() && (el.classList.contains('day-block') || el.classList.contains('hist-seg')) ? 'Long press for options' : 'Click for options') + '</div>';
     }
     function showSchedulePopup(el, ev) {
         showTimelineTooltip(scheduleTooltipHtml(el), ev);
@@ -1294,6 +1318,20 @@ document.addEventListener('DOMContentLoaded', function () {
     function suppressNextDayBlockTap() {
         suppressNextDayBlockClick = true;
         window.setTimeout(() => { suppressNextDayBlockClick = false; }, 1200);
+    }
+    const histSegLongPressMs = 560;
+    let histSegLongPressTimer = null;
+    let suppressNextHistSegClick = false;
+    let histSegPressPoint = null;
+    function clearHistSegLongPress() {
+        if (histSegLongPressTimer) {
+            window.clearTimeout(histSegLongPressTimer);
+            histSegLongPressTimer = null;
+        }
+    }
+    function suppressNextHistSegTap() {
+        suppressNextHistSegClick = true;
+        window.setTimeout(() => { suppressNextHistSegClick = false; }, 1200);
     }
 
     // Day-block hover tooltip
@@ -1340,13 +1378,52 @@ document.addEventListener('DOMContentLoaded', function () {
     // (same actions as the day-block click).
     document.querySelectorAll('.hist-seg').forEach(seg => {
         seg.addEventListener('mouseenter', ev => {
+            if (isMobileScheduleMode()) return;
             showSchedulePopup(seg, ev);
         });
         seg.addEventListener('mousemove', moveTooltip);
         seg.addEventListener('mouseleave', hideTooltip);
+        seg.addEventListener('pointerdown', ev => {
+            if (!isMobileScheduleMode() || ev.pointerType === 'mouse') return;
+            clearHistSegLongPress();
+            suppressNextHistSegClick = false;
+            histSegPressPoint = { clientX: ev.clientX, clientY: ev.clientY };
+            histSegLongPressTimer = window.setTimeout(() => {
+                histSegLongPressTimer = null;
+                suppressNextHistSegTap();
+                openScheduleContext(seg, histSegPressPoint);
+            }, histSegLongPressMs);
+        });
+        seg.addEventListener('pointermove', ev => {
+            if (!histSegLongPressTimer || !histSegPressPoint) return;
+            const dx = ev.clientX - histSegPressPoint.clientX;
+            const dy = ev.clientY - histSegPressPoint.clientY;
+            if (Math.hypot(dx, dy) > 10) clearHistSegLongPress();
+        });
+        seg.addEventListener('pointerup', clearHistSegLongPress);
+        seg.addEventListener('pointercancel', clearHistSegLongPress);
+        seg.addEventListener('pointerleave', clearHistSegLongPress);
+        seg.addEventListener('contextmenu', ev => {
+            if (!isMobileScheduleMode()) return;
+            ev.preventDefault();
+            suppressNextHistSegTap();
+            const point = (ev.clientX || ev.clientY)
+                ? { clientX: ev.clientX, clientY: ev.clientY }
+                : (histSegPressPoint || { clientX: window.innerWidth / 2, clientY: window.innerHeight / 2 });
+            openScheduleContext(seg, point);
+        });
         seg.addEventListener('click', ev => {
             ev.preventDefault();
             ev.stopPropagation();
+            if (isMobileScheduleMode()) {
+                if (suppressNextHistSegClick) {
+                    suppressNextHistSegClick = false;
+                    return;
+                }
+                closeCtxMenu();
+                showSchedulePopup(seg, ev);
+                return;
+            }
             openScheduleContext(seg, ev);
         });
     });
