@@ -85,6 +85,9 @@ $taskLabel = ucfirst(str_replace('_', ' ', $job['task_type']));
     .queue-panel .card-header {
         min-height: 46px;
     }
+    [data-bs-theme="dark"] .queue-stats-panel {
+        background-color: #1a1d21;
+    }
     .queue-progress-panel {
         background:
             radial-gradient(circle at 0 50%, rgba(255, 255, 255, 0.16), transparent 84px),
@@ -96,6 +99,7 @@ $taskLabel = ucfirst(str_replace('_', ' ', $job['task_type']));
     }
     /* Force long paths and command lines to wrap inside table cells / log entries */
     .job-detail-wrap {
+        font-size: 1em;
         word-break: break-all;
         overflow-wrap: anywhere;
         white-space: normal;
@@ -394,7 +398,7 @@ $taskLabel = ucfirst(str_replace('_', ' ', $job['task_type']));
     </div>
 
     <div class="col-lg-5">
-        <div class="card border-0 shadow-sm h-100 queue-panel">
+        <div class="card border-0 shadow-sm h-100 queue-panel queue-stats-panel">
             <?php if ($job['task_type'] === 'prune' && !empty($pruneStats)): ?>
             <div class="card-header card-head-gradient fw-semibold">
                 <i class="bi bi-scissors me-1"></i> Prune Stats
