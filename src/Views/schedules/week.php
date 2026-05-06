@@ -116,6 +116,17 @@ function bbs_histogram_ticks(int $max): array
     --schedule-concrete-bg-2: #9da6b2;
     --schedule-concrete-ink: #1f2933;
     --schedule-concrete-line: rgba(43, 50, 60, 0.14);
+    --schedule-error-bg: #cf5b5f;
+    --schedule-error-bg-2: #8f2732;
+    --schedule-error-hot: #ff777d;
+    --schedule-error-ink: #fff3f4;
+    --schedule-error-crack: rgba(70, 6, 14, 0.5);
+    --schedule-error-cracked:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(65, 4, 12, 0.34)),
+        linear-gradient(28deg, transparent 0 36%, var(--schedule-error-crack) 36% 37.5%, transparent 37.5% 100%),
+        linear-gradient(148deg, transparent 0 62%, rgba(255, 210, 214, 0.32) 62% 63%, transparent 63% 100%),
+        repeating-linear-gradient(112deg, transparent 0 16px, rgba(78, 0, 12, 0.28) 16px 17px, transparent 17px 31px),
+        linear-gradient(135deg, var(--schedule-error-bg), var(--schedule-error-bg-2));
 }
 [data-bs-theme="dark"] {
     --schedule-laser: #36a2ff;
@@ -130,6 +141,11 @@ function bbs_histogram_ticks(int $max): array
     --schedule-concrete-bg-2: #333b45;
     --schedule-concrete-ink: #f1f5f9;
     --schedule-concrete-line: rgba(255, 255, 255, 0.08);
+    --schedule-error-bg: #9f2f39;
+    --schedule-error-bg-2: #451018;
+    --schedule-error-hot: #ff5c66;
+    --schedule-error-ink: #fff5f6;
+    --schedule-error-crack: rgba(12, 0, 3, 0.68);
 }
 .schedule-shell {
     color-scheme: light dark;
@@ -179,7 +195,7 @@ function bbs_histogram_ticks(int $max): array
 .hist-current-time-line::before {
     content: "";
     position: absolute;
-    left: -5px;
+    left: -6px;
     top: -5px;
     width: 10px;
     height: 10px;
@@ -192,7 +208,7 @@ function bbs_histogram_ticks(int $max): array
 }
 .hist-current-time-line .current-time-label {
     position: absolute;
-    top: 2px;
+    top: -20px;
     left: 8px;
     padding: 2px 8px;
     border-radius: 999px;
@@ -300,12 +316,24 @@ function bbs_histogram_ticks(int $max): array
 .hist-event.is-past {
     color: var(--schedule-concrete-ink);
     text-shadow: none;
+    z-index: inherit;
+}
+.hist-event.is-error::after {
+    background: var(--schedule-error-cracked);
+    box-shadow: inset 0 0 14px rgba(54, 0, 8, 0.28);
+}
+.hist-event.is-error.is-past {
+    color: var(--schedule-error-ink);
 }
 .hist-seg.is-past {
     background:
         repeating-linear-gradient(45deg, var(--schedule-concrete-line) 0 1px, transparent 1px 6px),
         linear-gradient(180deg, var(--schedule-concrete-bg), var(--schedule-concrete-bg-2));
-    border-left: 2px solid var(--agent-accent);
+    border-left: 5px solid var(--agent-accent);
+}
+.hist-seg.is-error.is-past {
+    background: var(--schedule-error-cracked);
+    border-left-color: var(--schedule-error-hot);
 }
 .hist-seg:hover {
     filter: brightness(1.25);
@@ -474,7 +502,7 @@ function bbs_histogram_ticks(int $max): array
 .current-time-line .current-time-label {
     position: absolute;
     right: 8px;
-    top: -13px;
+    top: -8px;
     padding: 2px 8px;
     border-radius: 999px;
     background: linear-gradient(135deg, var(--schedule-laser), #243a6b);
@@ -505,7 +533,7 @@ function bbs_histogram_ticks(int $max): array
     color: #fff;
     overflow: hidden;
     cursor: pointer;
-    border-left: 4px solid var(--agent-accent);
+    border-left: 5px solid var(--agent-accent);
     transition: opacity 0.15s, transform 0.15s, filter 0.15s;
     text-decoration: none;
     background:
@@ -576,10 +604,20 @@ function bbs_histogram_ticks(int $max): array
 .day-block.is-active {
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.78), 0 0 5px rgba(0, 0, 0, 0.42);
 }
+.day-block.is-error::after {
+    background: var(--schedule-error-cracked);
+    box-shadow: inset 0 -10px 22px rgba(54, 0, 8, 0.25);
+}
+.day-block.is-error.is-past {
+    color: var(--schedule-error-ink);
+}
 .day-block.is-past::before {
     background: var(--agent-accent);
     box-shadow: none;
     opacity: 0.9;
+}
+.day-block.is-error.is-past::before {
+    background: var(--schedule-error-hot);
 }
 .day-block.estimated {
     background-image:
@@ -862,11 +900,12 @@ function bbs_histogram_ticks(int $max): array
                         $laneTop = (int) ($b['lane'] ?? 0) * 30;
                         $timelinePastPct = bbs_schedule_progress_pct((int) $b['day_idx'], (int) $b['start_min'], (int) $b['duration_min'], $todayIdx, $currentMinuteOfDay);
                         $timelinePhase = bbs_day_block_phase($timelinePastPct);
+                        $timelineIsError = !empty($b['has_error']);
                         $timelineDurLabel = $b['duration_min'] >= 60
                             ? floor($b['duration_min'] / 60) . 'h ' . ($b['duration_min'] % 60) . 'm'
                             : $b['duration_min'] . 'm';
                         ?>
-                        <div class="hist-seg hist-event is-<?= $timelinePhase ?>"
+                        <div class="hist-seg hist-event is-<?= $timelinePhase ?> <?= $timelineIsError ? 'is-error' : '' ?>"
                              data-schedule-id="<?= $b['schedule_id'] ?>"
                              data-agent-id="<?= (int) $b['agent_id'] ?>"
                              data-plan-name="<?= htmlspecialchars($b['plan_name']) ?>"
@@ -874,6 +913,7 @@ function bbs_histogram_ticks(int $max): array
                              data-time="<?= htmlspecialchars($b['time_label']) ?>"
                              data-duration="<?= htmlspecialchars($timelineDurLabel) ?>"
                              data-frequency="<?= htmlspecialchars($b['frequency']) ?>"
+                             data-job-status="<?= htmlspecialchars($b['job_status'] ?? '') ?>"
                              style="top: <?= $laneTop ?>px; left: <?= round($startPct, 4) ?>%; width: max(var(--timeline-block-min-width, 46px), <?= round($durationPct, 4) ?>%); max-width: calc(100% - <?= round($startPct, 4) ?>%); --agent-accent: <?= bbs_agent_color((int) $b['agent_id']) ?>; --past-pct: <?= round($timelinePastPct, 2) ?>%;">
                         </div>
                     <?php endforeach; ?>
@@ -957,6 +997,7 @@ function bbs_histogram_ticks(int $max): array
                             $color = bbs_agent_color($b['agent_id']);
                             $pastPct = bbs_day_block_progress_pct((int) $b['day_idx'], (int) $b['start_min'], (float) $height, $todayIdx, $currentMinuteOfDay, $pxPerHour);
                             $phase = bbs_day_block_phase($pastPct);
+                            $isError = !empty($b['has_error']);
                             $durLabel = $b['duration_min'] >= 60
                                 ? floor($b['duration_min'] / 60) . 'h ' . ($b['duration_min'] % 60) . 'm'
                                 : $b['duration_min'] . 'm';
@@ -970,7 +1011,7 @@ function bbs_histogram_ticks(int $max): array
                                 $b['estimated'] ? ' (no history)' : ''
                             );
                             ?>
-                        <div class="day-block <?= $b['estimated'] ? 'estimated' : '' ?> is-<?= $phase ?>"
+                        <div class="day-block <?= $b['estimated'] ? 'estimated' : '' ?> is-<?= $phase ?> <?= $isError ? 'is-error' : '' ?>"
                              data-agent-id="<?= $b['agent_id'] ?>"
                              data-schedule-id="<?= $b['schedule_id'] ?>"
                              data-plan-id="<?= $b['plan_id'] ?>"
@@ -980,6 +1021,7 @@ function bbs_histogram_ticks(int $max): array
                              data-time="<?= htmlspecialchars($b['time_label']) ?>"
                              data-duration="<?= htmlspecialchars($durLabel) ?>"
                              data-estimated="<?= $b['estimated'] ? '1' : '0' ?>"
+                             data-job-status="<?= htmlspecialchars($b['job_status'] ?? '') ?>"
                              style="top: <?= $top ?>px; height: <?= $height ?>px; left: calc(<?= $left ?>% + 4px); width: calc(<?= $laneWidth ?>% - 8px); --agent-accent: <?= $color ?>; --past-pct: <?= round($pastPct, 2) ?>%;">
                             <div class="agent"><?= htmlspecialchars($b['agent_name']) ?></div>
                             <div class="side">
@@ -1195,6 +1237,7 @@ document.addEventListener('DOMContentLoaded', function () {
             '<div class="tt-meta">' + esc(el.dataset.frequency) + '</div>' +
             'Starts: <strong>' + esc(el.dataset.time) + '</strong><br>' +
             'Est. duration: <strong>' + esc(el.dataset.duration || '') + '</strong>' +
+            (el.dataset.jobStatus === 'failed' ? '<br>Result: <strong>Error</strong>' : '') +
             (el.dataset.estimated === '1' ? ' <span style="opacity:.6">(no history — default)</span>' : '') +
             '<div class="tt-hint">' + (isMobileScheduleMode() && el.classList.contains('day-block') ? 'Long press for options' : 'Click for options') + '</div>';
     }
