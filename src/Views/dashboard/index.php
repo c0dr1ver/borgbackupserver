@@ -363,7 +363,9 @@ $dfFix = function (string $s): string {
                         <span><?= ServerStats::formatBytes((int) $loc['disk_free']) ?> free</span>
                     </div>
                     <?php else: ?>
-                    <div class="text-muted small fst-italic">Quota unavailable</div>
+                    <div class="text-muted small fst-italic">
+                        <?= ($loc['kind'] === 'remote' && (($loc['provider'] ?? '') === 'borgbase' || str_contains((string)($loc['path'] ?? ''), '.repo.borgbase.com'))) ? 'Set quota manually or use API' : 'Quota unavailable' ?>
+                    </div>
                     <?php endif; ?>
                     <div class="sc-footer">
                         <span><i class="bi bi-hdd me-1"></i><?= $loc['repo_count'] ?> repo<?= $loc['repo_count'] === 1 ? '' : 's' ?></span>
