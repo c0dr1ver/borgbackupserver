@@ -582,6 +582,12 @@ scp ~/.ssh/rsyncnet.pub <span class="text-warning" id="rsnScpUser">USERNAME</spa
 </div>
 
 <script>
+function escapeHtml(value) {
+    return value.replace(/[&<>"']/g, function(ch) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch];
+    });
+}
+
 function showWizardForm(provider) {
     document.getElementById('wizardProviders').style.display = 'none';
     document.getElementById('wizard' + provider.charAt(0).toUpperCase() + provider.slice(1)).style.display = 'block';
@@ -790,12 +796,6 @@ function testBorgbaseApiFromWizard() {
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-shield-check me-1"></i> Verify API';
         updateBbSubmit();
-    });
-}
-
-function escapeHtml(value) {
-    return value.replace(/[&<>"']/g, function(ch) {
-        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch];
     });
 }
 
@@ -1439,12 +1439,6 @@ $s3SyncServerBackups = ($settings['s3_sync_server_backups'] ?? '0') === '1';
 </div>
 
 <script>
-function escapeHtml(value) {
-    return value.replace(/[&<>"']/g, function(ch) {
-        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch];
-    });
-}
-
 function testRemoteSsh(id, triggerEl) {
     var resultDiv = document.getElementById('remoteSshTestResult' + id);
     resultDiv.innerHTML = '<span class="badge bg-secondary"><span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem"></span>Testing...</span>';
@@ -1474,12 +1468,13 @@ function testBorgbaseApiExisting(id) {
     var apiInput = document.getElementById('editBbApiKey' + id);
     var modal = document.getElementById('editRemoteSshModal' + id);
     var userInput = modal ? modal.querySelector('[name=remote_user]') : null;
+    var csrfInput = modal ? modal.querySelector('[name=csrf_token]') : null;
 
     resultDiv.style.display = 'block';
     resultDiv.innerHTML = '<div class="alert alert-secondary small py-2 px-3 mb-0"><span class="spinner-border spinner-border-sm me-1"></span>Checking BorgBase API...</div>';
 
     var formData = new URLSearchParams();
-    formData.append('csrf_token', document.querySelector('input[name=csrf_token]').value);
+    formData.append('csrf_token', csrfInput ? csrfInput.value : '');
     formData.append('config_id', String(id));
     formData.append('remote_user', userInput ? userInput.value.trim() : '');
     formData.append('borgbase_repo_name', repoInput ? repoInput.value.trim() : '');

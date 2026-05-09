@@ -56,7 +56,7 @@ class RemoteSshService
 
         try {
             return Encryption::decrypt($encrypted);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return null;
         }
     }
@@ -354,12 +354,12 @@ class RemoteSshService
             $quotaMb = (float) ($repo['quota'] ?? 0);
             $usedMb = (float) ($repo['currentUsage'] ?? 0);
             if ($quotaMb <= 0 || empty($repo['quotaEnabled'])) {
-                return ['success' => false, 'error' => 'BorgBase quota is disabled or unavailable for this repository.'];
+                return ['success' => false, 'error' => 'No BorgBase quota set. Enable it in BorgBase or use Manual Quota.'];
             }
 
-            // BorgBase returns quota in MB-like units; users see quota / 1000 as GB.
-            $total = (int) round(($quotaMb / 1000) * 1024 * 1024 * 1024);
-            $used = max(0, (int) round($usedMb * 1024 * 1024));
+            // BorgBase returns quota and currentUsage as decimal MB.
+            $total = (int) round($quotaMb * 1000 * 1000);
+            $used = max(0, (int) round($usedMb * 1000 * 1000));
             $free = max(0, $total - $used);
 
             return [
@@ -441,6 +441,7 @@ class RemoteSshService
             'Content-Type: application/json',
         ];
 
+        $code = 0;
         if (function_exists('curl_init')) {
             $ch = curl_init('https://api.borgbase.com/graphql');
             curl_setopt_array($ch, [
@@ -455,8 +456,8 @@ class RemoteSshService
             $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
 
-            if ($body === false || $code < 200 || $code >= 300) {
-                return ['success' => false, 'error' => $err ?: "BorgBase API returned HTTP {$code}."];
+            if ($body === false) {
+                return ['success' => false, 'error' => $err ?: 'BorgBase API request failed.'];
             }
         } else {
             $context = stream_context_create([
@@ -465,21 +466,34 @@ class RemoteSshService
                     'header' => implode("\r\n", $headers),
                     'content' => $payload,
                     'timeout' => 15,
+                    'ignore_errors' => true,
                 ],
             ]);
             $body = @file_get_contents('https://api.borgbase.com/graphql', false, $context);
             if ($body === false) {
                 return ['success' => false, 'error' => 'BorgBase API request failed.'];
             }
+            foreach ($http_response_header ?? [] as $header) {
+                if (preg_match('#^HTTP/\S+\s+(\d{3})#', $header, $m)) {
+                    $code = (int) $m[1];
+                    break;
+                }
+            }
         }
 
         $json = json_decode($body, true);
         if (!is_array($json)) {
+            if ($code !== 0 && ($code < 200 || $code >= 300)) {
+                return ['success' => false, 'error' => "BorgBase API returned HTTP {$code}."];
+            }
             return ['success' => false, 'error' => 'BorgBase API returned invalid JSON.'];
         }
         if (!empty($json['errors'])) {
             $message = $json['errors'][0]['message'] ?? 'BorgBase API returned an error.';
             return ['success' => false, 'error' => $message];
+        }
+        if ($code !== 0 && ($code < 200 || $code >= 300)) {
+            return ['success' => false, 'error' => "BorgBase API returned HTTP {$code}."];
         }
 
         $repos = $json['data']['repoList'] ?? null;
