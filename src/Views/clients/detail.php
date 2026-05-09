@@ -704,6 +704,11 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
         <?php foreach ($repositories as $repo):
             $s = $repo['size_bytes'];
             $sizeLabel = $s > 0 ? \BBS\Services\ServerStats::formatBytes((int) $s) : '--';
+            $quotaBytes = isset($repo['quota_bytes']) ? (int) $repo['quota_bytes'] : 0;
+            $quotaLabel = $quotaBytes > 0 ? \BBS\Services\ServerStats::formatBytes($quotaBytes) : null;
+            $freeBytes = $quotaBytes > 0 ? max(0, $quotaBytes - (int) $s) : null;
+            $quotaPct = $quotaBytes > 0 ? min(100, round(((int) $s / $quotaBytes) * 100, 1)) : 0;
+            $quotaBarColor = $quotaPct >= 95 ? 'danger' : ($quotaPct >= 80 ? 'warning' : 'success');
             $repoPlanCount = 0;
             foreach ($plans as $p) { if (($p['repository_id'] ?? 0) == $repo['id']) $repoPlanCount++; }
             $repoActiveJobs = 0;
@@ -779,11 +784,22 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
                             <div class="small text-muted">
                                 <i class="bi bi-stack me-1"></i><?= $repo['archive_count'] ?> recovery points
                             </div>
+                            <?php if ($quotaLabel): ?>
+                            <div class="mt-2">
+                                <div class="d-flex justify-content-between small text-muted mb-1">
+                                    <span><?= $quotaPct ?>% of <?= $quotaLabel ?></span>
+                                    <span><?= \BBS\Services\ServerStats::formatBytes($freeBytes) ?> free</span>
+                                </div>
+                                <div class="progress" style="height: 5px;">
+                                    <div class="progress-bar bg-<?= $quotaBarColor ?>" style="width: <?= $quotaPct ?>%"></div>
+                                </div>
+                            </div>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
                 <div class="repo-status-bar">
-                    <?= $sizeLabel ?> &middot; <?= $repo['archive_count'] ?> archives<?php if (isset($s3SyncByRepo[$repo['id']])): ?> &middot; <i class="bi bi-cloud text-info" title="Replicated to S3<?= !empty($s3SyncByRepo[$repo['id']]['last_sync']) ? ' (last: ' . \BBS\Core\TimeHelper::ago($s3SyncByRepo[$repo['id']]['last_sync']) . ')' : '' ?>"></i> S3 Sync<?php endif; ?>
+                    <?= $sizeLabel ?> used<?= $quotaLabel ? ' of ' . $quotaLabel : '' ?> &middot; <?= $repo['archive_count'] ?> archives<?php if (isset($s3SyncByRepo[$repo['id']])): ?> &middot; <i class="bi bi-cloud text-info" title="Replicated to S3<?= !empty($s3SyncByRepo[$repo['id']]['last_sync']) ? ' (last: ' . \BBS\Core\TimeHelper::ago($s3SyncByRepo[$repo['id']]['last_sync']) . ')' : '' ?>"></i> S3 Sync<?php endif; ?>
                 </div>
             </div>
         </div>
@@ -943,6 +959,17 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
                             <i class="bi bi-question-circle"></i> Borg encryption docs
                         </a>
                     </div>
+                </div>
+
+                <div class="row mb-3">
+                    <label class="col-md-3 col-form-label fw-semibold">Quota</label>
+                    <div class="col-md-6">
+                        <div class="input-group">
+                            <input type="number" class="form-control" name="quota_gb" min="1" step="1" placeholder="No quota">
+                            <span class="input-group-text">GB</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3 form-text pt-2">Optional purchased storage limit for this repo.</div>
                 </div>
 
                 <div class="row mb-3" id="passphraseRow">

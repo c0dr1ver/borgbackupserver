@@ -1310,6 +1310,208 @@ $s3SyncServerBackups = ($settings['s3_sync_server_backups'] ?? '0') === '1';
     </div>
 </div>
 
+<!-- Virtual Storage -->
+<?php
+$reposByAgent = [];
+foreach ($virtualStorageRepos ?? [] as $repo) {
+    $reposByAgent[$repo['agent_id']]['name'] = $repo['agent_name'];
+    $reposByAgent[$repo['agent_id']]['repos'][] = $repo;
+}
+$renderRepoCheckboxes = function (array $selectedIds = []) use ($reposByAgent) {
+    ob_start();
+    if (empty($reposByAgent)): ?>
+        <div class="text-muted small">No repositories available.</div>
+    <?php else: ?>
+        <div class="border rounded p-2" style="max-height: 260px; overflow:auto;">
+            <?php foreach ($reposByAgent as $agentId => $group): ?>
+            <div class="mb-2">
+                <div class="small fw-semibold text-muted mb-1">
+                    <i class="bi bi-display me-1"></i><?= htmlspecialchars($group['name']) ?>
+                </div>
+                <?php foreach ($group['repos'] as $repo): ?>
+                <label class="form-check d-flex align-items-center gap-2 mb-1">
+                    <input class="form-check-input mt-0" type="checkbox" name="repositories[]" value="<?= (int) $repo['id'] ?>" <?= in_array((int) $repo['id'], $selectedIds, true) ? 'checked' : '' ?>>
+                    <span class="small flex-grow-1">
+                        <?= htmlspecialchars($repo['name']) ?>
+                        <span class="text-muted">(<?= htmlspecialchars($repo['storage_type'] ?? 'local') ?>)</span>
+                    </span>
+                    <span class="small text-muted"><?= formatStorageBytes((int) $repo['size_bytes']) ?></span>
+                </label>
+                <?php endforeach; ?>
+            </div>
+            <?php endforeach; ?>
+        </div>
+    <?php endif;
+    return ob_get_clean();
+};
+?>
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-pie-chart me-2"></i>Virtual Storage</span>
+        <button class="btn btn-sm btn-success" data-bs-toggle="collapse" data-bs-target="#addVirtualStorageForm">
+            <i class="bi bi-plus-circle me-1"></i> Add Virtual Storage
+        </button>
+    </div>
+    <div class="card-body">
+        <div class="collapse mb-3" id="addVirtualStorageForm">
+            <div class="card border bg-body-tertiary">
+                <div class="card-body">
+                    <form method="POST" action="/storage-locations/virtual">
+                        <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
+                        <div class="row g-3">
+                            <div class="col-lg-3">
+                                <label class="form-label fw-semibold">Name</label>
+                                <input type="text" class="form-control" name="name" placeholder="Customer A - 500 GB" required>
+                            </div>
+                            <div class="col-lg-3">
+                                <label class="form-label fw-semibold">User</label>
+                                <select class="form-select" name="user_id" required>
+                                    <option value="">Select user...</option>
+                                    <?php foreach ($virtualStorageUsers ?? [] as $u): ?>
+                                    <option value="<?= (int) $u['id'] ?>"><?= htmlspecialchars($u['username']) ?> &lt;<?= htmlspecialchars($u['email']) ?>&gt;</option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="col-lg-2">
+                                <label class="form-label fw-semibold">Quota</label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" name="quota_gb" min="1" step="1" required>
+                                    <span class="input-group-text">GB</span>
+                                </div>
+                            </div>
+                            <div class="col-lg-4">
+                                <label class="form-label fw-semibold">Repositories</label>
+                                <?= $renderRepoCheckboxes() ?>
+                            </div>
+                            <div class="col-12 text-end">
+                                <button type="submit" class="btn btn-sm btn-success">Create</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <?php if (empty($virtualStorages)): ?>
+        <div class="alert alert-info mb-0">No virtual storage allocations configured yet.</div>
+        <?php else: ?>
+        <div class="row g-3">
+            <?php foreach ($virtualStorages as $vs): ?>
+            <?php
+                $used = (int) $vs['used_bytes'];
+                $quota = (int) $vs['quota_bytes'];
+                $free = (int) $vs['free_bytes'];
+                $pct = (float) $vs['usage_percent'];
+                $barColor = $pct >= 95 ? 'danger' : ($pct >= 80 ? 'warning' : 'success');
+            ?>
+            <div class="col-xl-4 col-lg-6">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                <h6 class="mb-1"><?= htmlspecialchars($vs['name']) ?></h6>
+                                <div class="small text-muted">
+                                    <i class="bi bi-person me-1"></i><?= htmlspecialchars($vs['username']) ?>
+                                </div>
+                            </div>
+                            <div class="dropdown">
+                                <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="dropdown">
+                                    <i class="bi bi-three-dots-vertical"></i>
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    <li>
+                                        <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#editVirtualStorageModal<?= (int) $vs['id'] ?>">
+                                            <i class="bi bi-pencil me-1"></i> Edit
+                                        </button>
+                                    </li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li>
+                                        <form method="POST" action="/storage-locations/virtual/<?= (int) $vs['id'] ?>/delete" data-confirm="Delete virtual storage &quot;<?= htmlspecialchars($vs['name']) ?>&quot;?" data-confirm-danger>
+                                            <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
+                                            <button type="submit" class="dropdown-item text-danger"><i class="bi bi-trash me-1"></i> Delete</button>
+                                        </form>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-between small text-muted mb-1">
+                            <span><?= formatStorageBytes($used) ?> used</span>
+                            <span><?= formatStorageBytes($free) ?> free</span>
+                        </div>
+                        <div class="progress" style="height: 6px;">
+                            <div class="progress-bar bg-<?= $barColor ?>" style="width: <?= $pct ?>%"></div>
+                        </div>
+                        <div class="text-muted small mt-1">
+                            <?= formatStorageBytes($quota) ?> quota &middot; <?= $pct ?>% used
+                        </div>
+                        <div class="mt-2 small text-muted">
+                            <i class="bi bi-archive me-1"></i><?= count($vs['repositories']) ?> repo<?= count($vs['repositories']) === 1 ? '' : 's' ?>
+                        </div>
+                        <?php if (!empty($vs['repositories'])): ?>
+                        <div class="mt-2 d-flex flex-wrap gap-1">
+                            <?php foreach (array_slice($vs['repositories'], 0, 4) as $repo): ?>
+                            <span class="badge text-bg-secondary"><?= htmlspecialchars($repo['agent_name']) ?> / <?= htmlspecialchars($repo['name']) ?></span>
+                            <?php endforeach; ?>
+                            <?php if (count($vs['repositories']) > 4): ?>
+                            <span class="badge text-bg-secondary">+<?= count($vs['repositories']) - 4 ?> more</span>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal fade" id="editVirtualStorageModal<?= (int) $vs['id'] ?>" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <form method="POST" action="/storage-locations/virtual/<?= (int) $vs['id'] ?>/update">
+                            <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
+                            <div class="modal-header">
+                                <h5 class="modal-title">Edit Virtual Storage</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="row g-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-semibold">Name</label>
+                                        <input type="text" class="form-control" name="name" value="<?= htmlspecialchars($vs['name']) ?>" required>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-semibold">User</label>
+                                        <select class="form-select" name="user_id" required>
+                                            <?php foreach ($virtualStorageUsers ?? [] as $u): ?>
+                                            <option value="<?= (int) $u['id'] ?>" <?= (int) $u['id'] === (int) $vs['user_id'] ? 'selected' : '' ?>><?= htmlspecialchars($u['username']) ?> &lt;<?= htmlspecialchars($u['email']) ?>&gt;</option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-semibold">Quota</label>
+                                        <div class="input-group">
+                                            <input type="number" class="form-control" name="quota_gb" min="1" step="1" value="<?= (int) ceil($quota / 1073741824) ?>" required>
+                                            <span class="input-group-text">GB</span>
+                                        </div>
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="form-label fw-semibold">Repositories</label>
+                                        <?= $renderRepoCheckboxes($vs['repository_ids']) ?>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                <button type="submit" class="btn btn-primary">Save Changes</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+    </div>
+</div>
+
 <script>
 function testRemoteSsh(id, triggerEl) {
     var resultDiv = document.getElementById('remoteSshTestResult' + id);

@@ -98,8 +98,17 @@ class BorgCommandBuilder
      */
     public static function buildInitCommand(array $repo): array
     {
-        $cmd = ['borg', 'init', '--encryption=' . $repo['encryption'], $repo['path']];
+        $cmd = ['borg', 'init', '--encryption=' . $repo['encryption']];
+        if (!empty($repo['quota_bytes'])) {
+            $cmd[] = '--storage-quota=' . self::formatBorgQuota((int) $repo['quota_bytes']);
+        }
+        $cmd[] = $repo['path'];
         return $cmd;
+    }
+
+    public static function formatBorgQuota(int $bytes): string
+    {
+        return max(1, (int) ceil($bytes / 1073741824)) . 'G';
     }
 
     /**

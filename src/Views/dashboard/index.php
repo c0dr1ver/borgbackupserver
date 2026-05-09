@@ -229,6 +229,45 @@ $dfFix = function (string $s): string {
         </div>
     </div>
 
+    <?php if (!$isAdmin && !empty($userVirtualStorages)): ?>
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header card-head-gradient fw-semibold">
+            <i class="bi bi-pie-chart me-2"></i>My Storage
+        </div>
+        <div class="card-body">
+            <div class="storage-grid <?= count($userVirtualStorages) <= 6 ? 'exact-cols' : '' ?> <?= count($userVirtualStorages) === 1 ? 'single-col' : '' ?>" style="--storage-cols: <?= min(count($userVirtualStorages), 6) ?>">
+                <?php foreach ($userVirtualStorages as $vs): ?>
+                <?php
+                    $quota = (int) $vs['quota_bytes'];
+                    $used = (int) $vs['used_bytes'];
+                    $free = (int) $vs['free_bytes'];
+                    $pct = (float) $vs['usage_percent'];
+                    $fillColor = $pct >= 95 ? '#dc3545' : ($pct >= 80 ? '#ffc107' : '#198754');
+                ?>
+                <div class="storage-card">
+                    <div class="sc-head">
+                        <div>
+                            <div class="sc-label"><?= htmlspecialchars($vs['name']) ?></div>
+                            <div class="sc-kind">Virtual Storage</div>
+                        </div>
+                        <span class="fw-bold" style="color: <?= $fillColor ?>;"><?= $pct ?>%</span>
+                    </div>
+                    <div class="sc-bar"><div class="sc-fill" style="width: <?= $pct ?>%; background: <?= $fillColor ?>;"></div></div>
+                    <div class="sc-numbers">
+                        <span><?= ServerStats::formatBytes($used) ?> used</span>
+                        <span><?= ServerStats::formatBytes($free) ?> free</span>
+                    </div>
+                    <div class="sc-footer">
+                        <span><i class="bi bi-archive me-1"></i><?= count($vs['repositories']) ?> repo<?= count($vs['repositories']) === 1 ? '' : 's' ?></span>
+                        <span><?= ServerStats::formatBytes($quota) ?> quota</span>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <!-- Row 2: Activity chart | Backup summary | Server health (admin only) -->
     <?php
         // Admin: Jobs gets half, Backup Summary + Server Health share the

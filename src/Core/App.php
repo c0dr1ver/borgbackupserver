@@ -190,6 +190,9 @@ class App
         $this->router->map('POST', '/storage-locations/s3/test', 'StorageLocationController@testS3');
         $this->router->map('POST', '/storage-locations/s3/list-backups', 'StorageLocationController@listS3Backups');
         $this->router->map('POST', '/storage-locations/s3/restore-backup', 'StorageLocationController@restoreS3Backup');
+        $this->router->map('POST', '/storage-locations/virtual', 'StorageLocationController@storeVirtual');
+        $this->router->map('POST', '/storage-locations/virtual/[i:id]/update', 'StorageLocationController@updateVirtual');
+        $this->router->map('POST', '/storage-locations/virtual/[i:id]/delete', 'StorageLocationController@deleteVirtual');
 
         // Remote SSH Configs
         $this->router->map('POST', '/remote-ssh-configs/create', 'RemoteSshConfigController@store');

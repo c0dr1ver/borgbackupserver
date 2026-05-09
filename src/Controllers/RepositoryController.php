@@ -30,6 +30,24 @@ class RepositoryController extends Controller
         return $slug ?: 'repo';
     }
 
+    private function quotaBytesFromGb($value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (!is_numeric($value)) {
+            throw new \InvalidArgumentException('Quota must be a number of GB.');
+        }
+
+        $gb = (float) $value;
+        if ($gb <= 0) {
+            return null;
+        }
+
+        return (int) round($gb * 1024 * 1024 * 1024);
+    }
+
     public function store(): void
     {
         $this->requireAuth();
@@ -41,6 +59,12 @@ class RepositoryController extends Controller
         $passphrase = $_POST['passphrase'] ?? '';
         $storageType = $_POST['storage_type'] ?? 'local';
         $remoteSshConfigId = !empty($_POST['remote_ssh_config_id']) ? (int) $_POST['remote_ssh_config_id'] : null;
+        try {
+            $quotaBytes = $this->quotaBytesFromGb($_POST['quota_gb'] ?? null);
+        } catch (\InvalidArgumentException $e) {
+            $this->flash('danger', $e->getMessage());
+            $this->redirect("/clients/{$agentId}?tab=repos");
+        }
 
         if (empty($name) || empty($agentId)) {
             $this->flash('danger', 'Repository name and agent are required.');
@@ -64,16 +88,16 @@ class RepositoryController extends Controller
 
         // Branch based on storage type
         if ($storageType === 'remote_ssh') {
-            $this->storeRemoteSsh($agentId, $name, $encryption, $passphrase, $remoteSshConfigId);
+            $this->storeRemoteSsh($agentId, $name, $encryption, $passphrase, $remoteSshConfigId, $quotaBytes);
         } else {
-            $this->storeLocal($agentId, $agent, $name, $encryption, $passphrase, $storageLocationId);
+            $this->storeLocal($agentId, $agent, $name, $encryption, $passphrase, $storageLocationId, $quotaBytes);
         }
     }
 
     /**
      * Create a local repository on the BBS server.
      */
-    private function storeLocal(int $agentId, array $agent, string $name, string $encryption, string $passphrase, ?int $storageLocationId = null): void
+    private function storeLocal(int $agentId, array $agent, string $name, string $encryption, string $passphrase, ?int $storageLocationId = null, ?int $quotaBytes = null): void
     {
         // Resolve storage location
         $location = null;
@@ -138,6 +162,7 @@ class RepositoryController extends Controller
             'path' => $path,
             'encryption' => $encryption,
             'passphrase_encrypted' => $encryption !== 'none' ? Encryption::encrypt($passphrase) : null,
+            'quota_bytes' => $quotaBytes,
         ]);
 
         // Run borg init server-side (repos are local to server)
@@ -173,6 +198,12 @@ class RepositoryController extends Controller
         if ($encryption !== 'none' && !empty($passphrase)) {
             $initCmd[] = '-';
             $passphraseToPipe = $passphrase;
+        }
+        if (!empty($quotaBytes)) {
+            if ($passphraseToPipe === '' && $encryption === 'none') {
+                $initCmd[] = '';
+            }
+            $initCmd[] = BorgCommandBuilder::formatBorgQuota($quotaBytes);
         }
         $initOutput = [];
         $initRet = 1;
@@ -227,7 +258,7 @@ class RepositoryController extends Controller
     /**
      * Create a repository on a remote SSH host (rsync.net, BorgBase, etc.)
      */
-    private function storeRemoteSsh(int $agentId, string $name, string $encryption, string $passphrase, ?int $remoteSshConfigId): void
+    private function storeRemoteSsh(int $agentId, string $name, string $encryption, string $passphrase, ?int $remoteSshConfigId, ?int $quotaBytes = null): void
     {
         if (!$remoteSshConfigId) {
             $this->flash('danger', 'Please select a remote SSH host.');
@@ -246,7 +277,7 @@ class RepositoryController extends Controller
         $repoPath = $remoteSshService->buildRepoPath($config, $safeName);
 
         // Run borg init over SSH first — only save to DB if it succeeds
-        $result = $remoteSshService->initRepo($config, $repoPath, $encryption, $passphrase);
+        $result = $remoteSshService->initRepo($config, $repoPath, $encryption, $passphrase, $quotaBytes);
 
         if (!$result['success']) {
             $errorMsg = $result['stderr'] ?? $result['output'] ?? 'Unknown error';
@@ -267,6 +298,7 @@ class RepositoryController extends Controller
             'path' => $repoPath,
             'encryption' => $encryption,
             'passphrase_encrypted' => $encryption !== 'none' ? Encryption::encrypt($passphrase) : null,
+            'quota_bytes' => $quotaBytes,
         ]);
 
         $this->db->insert('server_log', [
@@ -1248,6 +1280,7 @@ class RepositoryController extends Controller
                 'path' => $copyPath,
                 'encryption' => $repo['encryption'],
                 'passphrase_encrypted' => $repo['passphrase_encrypted'],
+                'quota_bytes' => $repo['quota_bytes'] ?? null,
             ]);
             $targetRepoName = $copyName;
 

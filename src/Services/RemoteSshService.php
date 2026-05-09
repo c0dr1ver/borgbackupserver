@@ -122,10 +122,13 @@ class RemoteSshService
     /**
      * Initialize a borg repository on the remote host.
      */
-    public function initRepo(array $config, string $repoPath, string $encryption, string $passphrase = ''): array
+    public function initRepo(array $config, string $repoPath, string $encryption, string $passphrase = '', ?int $quotaBytes = null): array
     {
         $borgRemotePath = $config['borg_remote_path'] ?? null;
         $cmd = ['borg', 'init', '--encryption=' . $encryption];
+        if (!empty($quotaBytes)) {
+            $cmd[] = '--storage-quota=' . \BBS\Services\BorgCommandBuilder::formatBorgQuota($quotaBytes);
+        }
         if ($borgRemotePath) {
             $cmd[] = '--remote-path=' . $borgRemotePath;
         }

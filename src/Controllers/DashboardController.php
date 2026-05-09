@@ -5,6 +5,7 @@ namespace BBS\Controllers;
 use BBS\Core\Controller;
 use BBS\Services\Cache;
 use BBS\Services\ServerStats;
+use BBS\Services\VirtualStorageService;
 
 class DashboardController extends Controller
 {
@@ -544,6 +545,7 @@ class DashboardController extends Controller
 
         return [
             'isAdmin' => $isAdmin,
+            'userVirtualStorages' => $isAdmin ? [] : (new VirtualStorageService())->getForUser((int) $userId),
             'agentCount' => (int) $agentCount,
             'onlineCount' => (int) $onlineCount,
             'runningJobs' => (int) $runningJobs,

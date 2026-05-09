@@ -236,7 +236,7 @@ $sizeLabel = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $tota
 
                 <!-- Dedup & Encryption Stats -->
                 <div class="row g-2 mb-3">
-                    <div class="col-6">
+                    <div class="<?= !empty($repo['quota_bytes']) ? 'col-6 col-lg-4' : 'col-6' ?>">
                         <div class="p-3 bg-body-secondary rounded text-center h-100">
                             <div class="fw-bold fs-5 text-success"><?= $dedupRatio ?></div>
                             <div class="text-muted" style="font-size: 0.7rem;">Dedup Ratio</div>
@@ -245,12 +245,29 @@ $sizeLabel = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $tota
                             <?php endif; ?>
                         </div>
                     </div>
-                    <div class="col-6">
+                    <div class="<?= !empty($repo['quota_bytes']) ? 'col-6 col-lg-4' : 'col-6' ?>">
                         <div class="p-3 bg-body-secondary rounded text-center h-100">
                             <div class="fw-bold fs-5"><i class="bi bi-shield-lock text-warning me-1" style="font-size: 0.9rem;"></i><?= htmlspecialchars($repo['encryption'] ?: 'none') ?></div>
                             <div class="text-muted" style="font-size: 0.7rem;">Encryption</div>
                         </div>
                     </div>
+                    <?php if (!empty($repo['quota_bytes'])): ?>
+                    <?php
+                        $quotaBytes = (int) $repo['quota_bytes'];
+                        $quotaPct = $quotaBytes > 0 ? min(100, round(((int) $repo['size_bytes'] / $quotaBytes) * 100, 1)) : 0;
+                        $freeBytes = max(0, $quotaBytes - (int) $repo['size_bytes']);
+                        $quotaColor = $quotaPct >= 95 ? 'text-danger' : ($quotaPct >= 80 ? 'text-warning' : 'text-info');
+                    ?>
+                    <div class="col-12 col-lg-4">
+                        <div class="p-3 bg-body-secondary rounded text-center h-100">
+                            <div class="fw-bold fs-5 <?= $quotaColor ?>"><?= \BBS\Services\ServerStats::formatBytes($freeBytes) ?></div>
+                            <div class="text-muted" style="font-size: 0.7rem;">Free of <?= \BBS\Services\ServerStats::formatBytes($quotaBytes) ?></div>
+                            <div class="progress mt-2" style="height: 5px;">
+                                <div class="progress-bar <?= $quotaPct >= 95 ? 'bg-danger' : ($quotaPct >= 80 ? 'bg-warning' : 'bg-info') ?>" style="width: <?= $quotaPct ?>%"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 </div>
 
                 <!-- Details -->

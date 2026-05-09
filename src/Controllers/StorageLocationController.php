@@ -4,6 +4,7 @@ namespace BBS\Controllers;
 
 use BBS\Core\Controller;
 use BBS\Services\ServerStats;
+use BBS\Services\VirtualStorageService;
 
 class StorageLocationController extends Controller
 {
@@ -56,6 +57,7 @@ class StorageLocationController extends Controller
 
         // Local repo count
         $localRepoCount = (int) ($this->db->fetchOne("SELECT COUNT(*) as cnt FROM repositories WHERE storage_type = 'local' OR storage_type IS NULL")['cnt'] ?? 0);
+        $virtualStorageService = new VirtualStorageService();
 
         $this->view('storage-locations/index', [
             'pageTitle' => 'Storage',
@@ -64,6 +66,9 @@ class StorageLocationController extends Controller
             'remoteRepoCount' => $remoteRepoCount,
             'localRepoCount' => $localRepoCount,
             'settings' => $settings,
+            'virtualStorages' => $virtualStorageService->getAll(),
+            'virtualStorageUsers' => $virtualStorageService->listUsers(),
+            'virtualStorageRepos' => $virtualStorageService->getAssignableRepositories(),
         ]);
     }
 
@@ -402,6 +407,83 @@ class StorageLocationController extends Controller
             'username' => 'admin',
             'password' => $newPassword,
         ]);
+    }
+
+    public function storeVirtual(): void
+    {
+        $this->requireAdmin();
+        $this->verifyCsrf();
+
+        [$name, $userId, $quotaBytes, $repoIds] = $this->readVirtualStorageInput();
+        (new VirtualStorageService())->create($name, $userId, $quotaBytes, $repoIds);
+
+        $this->flash('success', "Virtual storage \"{$name}\" created.");
+        $this->redirect('/storage-locations');
+    }
+
+    public function updateVirtual(int $id): void
+    {
+        $this->requireAdmin();
+        $this->verifyCsrf();
+
+        $existing = $this->db->fetchOne("SELECT id FROM virtual_storages WHERE id = ?", [$id]);
+        if (!$existing) {
+            $this->flash('danger', 'Virtual storage not found.');
+            $this->redirect('/storage-locations');
+        }
+
+        [$name, $userId, $quotaBytes, $repoIds] = $this->readVirtualStorageInput();
+        (new VirtualStorageService())->update($id, $name, $userId, $quotaBytes, $repoIds);
+
+        $this->flash('success', "Virtual storage \"{$name}\" updated.");
+        $this->redirect('/storage-locations');
+    }
+
+    public function deleteVirtual(int $id): void
+    {
+        $this->requireAdmin();
+        $this->verifyCsrf();
+
+        (new VirtualStorageService())->delete($id);
+        $this->flash('success', 'Virtual storage deleted.');
+        $this->redirect('/storage-locations');
+    }
+
+    private function readVirtualStorageInput(): array
+    {
+        $name = trim($_POST['name'] ?? '');
+        $userId = (int) ($_POST['user_id'] ?? 0);
+        $repoIds = $_POST['repositories'] ?? [];
+
+        if ($name === '') {
+            $this->flash('danger', 'Virtual storage name is required.');
+            $this->redirect('/storage-locations');
+        }
+
+        $user = $this->db->fetchOne("SELECT id FROM users WHERE id = ? AND role != 'admin'", [$userId]);
+        if (!$user) {
+            $this->flash('danger', 'Please select a non-admin user for this virtual storage.');
+            $this->redirect('/storage-locations');
+        }
+
+        try {
+            $quotaBytes = VirtualStorageService::quotaBytesFromGb($_POST['quota_gb'] ?? null);
+        } catch (\InvalidArgumentException $e) {
+            $this->flash('danger', $e->getMessage());
+            $this->redirect('/storage-locations');
+        }
+
+        if (!$quotaBytes) {
+            $this->flash('danger', 'Quota must be greater than 0 GB.');
+            $this->redirect('/storage-locations');
+        }
+
+        if (!is_array($repoIds) || empty($repoIds)) {
+            $this->flash('danger', 'Select at least one repository for this virtual storage.');
+            $this->redirect('/storage-locations');
+        }
+
+        return [$name, $userId, $quotaBytes, $repoIds];
     }
 
     /**

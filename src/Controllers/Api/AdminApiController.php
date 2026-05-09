@@ -16,6 +16,35 @@ class AdminApiController extends Controller
         return is_array($data) ? $data : [];
     }
 
+    private function quotaBytesFromInput(array $input): ?int
+    {
+        if (array_key_exists('quota_bytes', $input)) {
+            $value = $input['quota_bytes'];
+            if ($value === null || $value === '') {
+                return null;
+            }
+            if (!is_numeric($value)) {
+                $this->json(['error' => 'quota_bytes must be numeric'], 400);
+            }
+            $bytes = (int) $value;
+            return $bytes > 0 ? $bytes : null;
+        }
+
+        if (array_key_exists('quota_gb', $input)) {
+            $value = $input['quota_gb'];
+            if ($value === null || $value === '') {
+                return null;
+            }
+            if (!is_numeric($value)) {
+                $this->json(['error' => 'quota_gb must be numeric'], 400);
+            }
+            $gb = (float) $value;
+            return $gb > 0 ? (int) round($gb * 1024 * 1024 * 1024) : null;
+        }
+
+        return null;
+    }
+
     // ── Clients ──────────────────────────────────────────
 
     public function listClients(): void
@@ -61,7 +90,7 @@ class AdminApiController extends Controller
 
         // Include repos and plans
         $repos = $this->db->fetchAll(
-            "SELECT id, name, path, encryption, storage_type, size_bytes, archive_count, created_at
+            "SELECT id, name, path, encryption, storage_type, size_bytes, quota_bytes, archive_count, created_at
              FROM repositories WHERE agent_id = ? ORDER BY name", [$id]
         );
         $plans = $this->db->fetchAll(
@@ -191,7 +220,7 @@ class AdminApiController extends Controller
         }
 
         $repos = $this->db->fetchAll(
-            "SELECT id, name, path, encryption, storage_type, size_bytes, archive_count, created_at
+            "SELECT id, name, path, encryption, storage_type, size_bytes, quota_bytes, archive_count, created_at
              FROM repositories WHERE agent_id = ? ORDER BY name", [$id]
         );
 
@@ -213,6 +242,7 @@ class AdminApiController extends Controller
         $passphrase = $input['passphrase'] ?? '';
         $storageType = $input['storage_type'] ?? 'local';
         $remoteSshConfigId = !empty($input['remote_ssh_config_id']) ? (int) $input['remote_ssh_config_id'] : null;
+        $quotaBytes = $this->quotaBytesFromInput($input);
 
         if (empty($name)) {
             $this->json(['error' => 'Repository name is required'], 400);
@@ -220,7 +250,7 @@ class AdminApiController extends Controller
 
         // Route to remote SSH handler if requested
         if ($storageType === 'remote_ssh') {
-            $this->createRemoteSshRepository($id, $name, $encryption, $passphrase, $remoteSshConfigId);
+            $this->createRemoteSshRepository($id, $name, $encryption, $passphrase, $remoteSshConfigId, $quotaBytes);
             return;
         }
 
@@ -297,6 +327,7 @@ class AdminApiController extends Controller
             'path' => $path,
             'encryption' => $encryption,
             'passphrase_encrypted' => $encryption !== 'none' ? Encryption::encrypt($passphrase) : null,
+            'quota_bytes' => $quotaBytes,
         ]);
 
         // Run borg init
@@ -344,6 +375,7 @@ class AdminApiController extends Controller
             'path' => $path,
             'encryption' => $encryption,
             'storage_type' => 'local',
+            'quota_bytes' => $quotaBytes,
         ];
 
         if ($encryption !== 'none') {
@@ -704,7 +736,7 @@ class AdminApiController extends Controller
 
     // ── Remote SSH Repos ────────────────────────────────
 
-    private function createRemoteSshRepository(int $id, string $name, string $encryption, string $passphrase, ?int $remoteSshConfigId): void
+    private function createRemoteSshRepository(int $id, string $name, string $encryption, string $passphrase, ?int $remoteSshConfigId, ?int $quotaBytes = null): void
     {
         if (!$remoteSshConfigId) {
             $this->json(['error' => 'remote_ssh_config_id is required for remote SSH repositories'], 400);
@@ -729,7 +761,7 @@ class AdminApiController extends Controller
 
         $repoPath = $remoteSshService->buildRepoPath($config, $safeName);
 
-        $result = $remoteSshService->initRepo($config, $repoPath, $encryption, $passphrase);
+        $result = $remoteSshService->initRepo($config, $repoPath, $encryption, $passphrase, $quotaBytes);
         if (!$result['success']) {
             $errorMsg = $result['stderr'] ?? $result['output'] ?? 'Unknown error';
             $this->db->insert('server_log', [
@@ -748,6 +780,7 @@ class AdminApiController extends Controller
             'path' => $repoPath,
             'encryption' => $encryption,
             'passphrase_encrypted' => $encryption !== 'none' ? Encryption::encrypt($passphrase) : null,
+            'quota_bytes' => $quotaBytes,
         ]);
 
         $this->db->insert('server_log', [
@@ -763,6 +796,7 @@ class AdminApiController extends Controller
             'encryption' => $encryption,
             'storage_type' => 'remote_ssh',
             'remote_host' => $config['remote_host'],
+            'quota_bytes' => $quotaBytes,
         ];
 
         if ($encryption !== 'none') {
@@ -784,53 +818,79 @@ class AdminApiController extends Controller
             $this->json(['error' => 'Repository not found'], 404);
         }
 
-        $newName = trim($input['name'] ?? '');
-        if (empty($newName)) {
-            $this->json(['error' => 'name is required'], 400);
+        $hasName = array_key_exists('name', $input);
+        $hasQuota = array_key_exists('quota_gb', $input) || array_key_exists('quota_bytes', $input);
+        if (!$hasName && !$hasQuota) {
+            $this->json(['error' => 'Provide name, quota_gb, or quota_bytes'], 400);
         }
 
-        if (($repo['storage_type'] ?? 'local') === 'remote_ssh') {
-            $this->json(['error' => 'Rename is not supported for remote SSH repositories'], 400);
+        $updates = [];
+        $safeName = $repo['name'];
+        $newPath = $repo['path'];
+
+        if ($hasQuota) {
+            $updates['quota_bytes'] = $this->quotaBytesFromInput($input);
         }
 
-        $activeJobs = $this->db->fetchOne("SELECT COUNT(*) as cnt FROM backup_jobs WHERE repository_id = ? AND status IN ('queued', 'sent', 'running')", [$repoId]);
-        if ((int) ($activeJobs['cnt'] ?? 0) > 0) {
-            $this->json(['error' => 'Cannot rename while jobs are active'], 409);
-        }
-
-        $safeName = $this->sanitizeRepoName($newName);
-        if (empty($safeName)) {
-            $this->json(['error' => 'Name must contain at least one alphanumeric character'], 400);
-        }
-
-        $lastSlash = strrpos($repo['path'], '/');
-        $newPath = substr($repo['path'], 0, $lastSlash + 1) . $safeName;
-
-        $existing = $this->db->fetchOne("SELECT id FROM repositories WHERE path = ? AND id != ?", [$newPath, $repoId]);
-        if ($existing) {
-            $this->json(['error' => 'A repository already exists at that path'], 409);
-        }
-
-        // Rename on disk
-        $oldLocalPath = BorgCommandBuilder::getLocalRepoPath($repo);
-        if (!empty($oldLocalPath) && is_dir($oldLocalPath)) {
-            $newLocalPath = dirname($oldLocalPath) . '/' . $safeName;
-            $cmd = 'sudo /usr/local/bin/bbs-ssh-helper rename-repo-dir ' . escapeshellarg($oldLocalPath) . ' ' . escapeshellarg($newLocalPath) . ' 2>&1';
-            exec($cmd, $output, $retval);
-            if ($retval !== 0) {
-                $this->json(['error' => 'Rename failed: ' . implode(' ', $output)], 500);
+        if ($hasName) {
+            $newName = trim($input['name'] ?? '');
+            if (empty($newName)) {
+                $this->json(['error' => 'name cannot be empty'], 400);
             }
+
+            if (($repo['storage_type'] ?? 'local') === 'remote_ssh') {
+                $this->json(['error' => 'Rename is not supported for remote SSH repositories'], 400);
+            }
+
+            $activeJobs = $this->db->fetchOne("SELECT COUNT(*) as cnt FROM backup_jobs WHERE repository_id = ? AND status IN ('queued', 'sent', 'running')", [$repoId]);
+            if ((int) ($activeJobs['cnt'] ?? 0) > 0) {
+                $this->json(['error' => 'Cannot rename while jobs are active'], 409);
+            }
+
+            $safeName = $this->sanitizeRepoName($newName);
+            if (empty($safeName)) {
+                $this->json(['error' => 'Name must contain at least one alphanumeric character'], 400);
+            }
+
+            $lastSlash = strrpos($repo['path'], '/');
+            $newPath = substr($repo['path'], 0, $lastSlash + 1) . $safeName;
+
+            $existing = $this->db->fetchOne("SELECT id FROM repositories WHERE path = ? AND id != ?", [$newPath, $repoId]);
+            if ($existing) {
+                $this->json(['error' => 'A repository already exists at that path'], 409);
+            }
+
+            // Rename on disk
+            $oldLocalPath = BorgCommandBuilder::getLocalRepoPath($repo);
+            if (!empty($oldLocalPath) && is_dir($oldLocalPath)) {
+                $newLocalPath = dirname($oldLocalPath) . '/' . $safeName;
+                $cmd = 'sudo /usr/local/bin/bbs-ssh-helper rename-repo-dir ' . escapeshellarg($oldLocalPath) . ' ' . escapeshellarg($newLocalPath) . ' 2>&1';
+                exec($cmd, $output, $retval);
+                if ($retval !== 0) {
+                    $this->json(['error' => 'Rename failed: ' . implode(' ', $output)], 500);
+                }
+            }
+
+            $updates['name'] = $safeName;
+            $updates['path'] = $newPath;
         }
 
-        $this->db->update('repositories', ['name' => $safeName, 'path' => $newPath], 'id = ?', [$repoId]);
+        $this->db->update('repositories', $updates, 'id = ?', [$repoId]);
 
         $this->db->insert('server_log', [
             'agent_id' => $id,
             'level' => 'info',
-            'message' => "Repository renamed from \"{$repo['name']}\" to \"{$safeName}\" via API",
+            'message' => $hasName
+                ? "Repository renamed from \"{$repo['name']}\" to \"{$safeName}\" via API"
+                : "Repository \"{$repo['name']}\" quota updated via API",
         ]);
 
-        $this->json(['status' => 'ok', 'name' => $safeName, 'path' => $newPath]);
+        $this->json([
+            'status' => 'ok',
+            'name' => $safeName,
+            'path' => $newPath,
+            'quota_bytes' => $hasQuota ? $updates['quota_bytes'] : ($repo['quota_bytes'] ?? null),
+        ]);
     }
 
     public function deleteRepository(int $id, int $repoId): void

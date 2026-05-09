@@ -446,14 +446,15 @@ case "$ACTION" in
     borg-init)
         # Run borg init as root so it works on NFS and other filesystems where
         # www-data may not have write access despite correct POSIX permissions.
-        # Usage: bbs-ssh-helper borg-init <repo_path> <encryption> [passphrase|-]
+        # Usage: bbs-ssh-helper borg-init <repo_path> <encryption> [passphrase|-] [quota]
         REPO_PATH="${2:-}"
         ENCRYPTION="${3:-}"
         PASSPHRASE="${4:-}"
+        STORAGE_QUOTA="${5:-}"
         if [ "$PASSPHRASE" = "-" ]; then IFS= read -r PASSPHRASE || PASSPHRASE=""; fi
 
         if [ -z "$REPO_PATH" ] || [ -z "$ENCRYPTION" ]; then
-            echo "Usage: bbs-ssh-helper borg-init <repo_path> <encryption> [passphrase]"
+            echo "Usage: bbs-ssh-helper borg-init <repo_path> <encryption> [passphrase] [quota]"
             exit 1
         fi
 
@@ -472,6 +473,15 @@ case "$ACTION" in
                 ;;
         esac
 
+        QUOTA_ARGS=()
+        if [ -n "$STORAGE_QUOTA" ]; then
+            if [[ ! "$STORAGE_QUOTA" =~ ^[0-9]+([.][0-9]+)?[KMGTP]?$ ]]; then
+                echo "Error: invalid storage quota: $STORAGE_QUOTA"
+                exit 1
+            fi
+            QUOTA_ARGS=("--storage-quota=$STORAGE_QUOTA")
+        fi
+
         mkdir -p /tmp/bbs-borg-init
 
         BORG_PASSPHRASE="$PASSPHRASE" \
@@ -479,7 +489,7 @@ case "$ACTION" in
         BORG_RELOCATED_REPO_ACCESS_IS_OK=yes \
         BORG_BASE_DIR="/tmp/bbs-borg-init" \
         HOME="/tmp/bbs-borg-init" \
-            borg init "--encryption=$ENCRYPTION" "$REPO_PATH" 2>&1
+            borg init "--encryption=$ENCRYPTION" "${QUOTA_ARGS[@]}" "$REPO_PATH" 2>&1
 
         exit $?
         ;;
