@@ -323,6 +323,24 @@ $dfFix = function (string $s): string {
 
     <!-- Row 3: Storage Locations — admin only, infra detail -->
     <?php if ($isAdmin && !empty($storageLocations)): ?>
+    <?php
+        $formatStorageWidgetBytes = function (int $bytes, array $loc): string {
+            $isBorgBaseApi = ($loc['kind'] ?? '') === 'remote'
+                && ((($loc['provider'] ?? '') === 'borgbase') || str_contains((string)($loc['path'] ?? ''), '.repo.borgbase.com'))
+                && (($loc['borgbase_usage_source'] ?? '') === 'borgbase_api');
+            if (!$isBorgBaseApi) {
+                return ServerStats::formatBytes($bytes);
+            }
+            $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            $i = 0;
+            $size = (float) $bytes;
+            while ($size >= 1000 && $i < count($units) - 1) {
+                $size /= 1000;
+                $i++;
+            }
+            return round($size, 1) . "\u{00A0}" . $units[$i];
+        };
+    ?>
     <div class="card border-0 shadow-sm mb-3">
         <div class="card-header card-head-gradient fw-semibold d-flex justify-content-between align-items-center">
             <span><i class="bi bi-hdd-stack me-2"></i>Storage Locations</span>
@@ -359,8 +377,8 @@ $dfFix = function (string $s): string {
                     <?php if ($loc['disk_total']): ?>
                     <div class="sc-bar"><div class="sc-fill" style="width: <?= $pct ?>%; background: <?= $fillColor ?>;"></div></div>
                     <div class="sc-numbers">
-                        <span><?= ServerStats::formatBytes((int) $loc['disk_used']) ?> used</span>
-                        <span><?= ServerStats::formatBytes((int) $loc['disk_free']) ?> free</span>
+                        <span><?= $formatStorageWidgetBytes((int) $loc['disk_used'], $loc) ?> used</span>
+                        <span><?= $formatStorageWidgetBytes((int) $loc['disk_free'], $loc) ?> free</span>
                     </div>
                     <?php else: ?>
                     <div class="text-muted small fst-italic">

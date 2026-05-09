@@ -5,6 +5,17 @@ function formatStorageBytes(int $bytes): string {
     return ServerStats::formatBytes($bytes);
 }
 
+function formatStorageBytesDecimal(int $bytes): string {
+    $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    $i = 0;
+    $size = (float) $bytes;
+    while ($size >= 1000 && $i < count($units) - 1) {
+        $size /= 1000;
+        $i++;
+    }
+    return round($size, 1) . "\u{00A0}" . $units[$i];
+}
+
 $section = $_GET['section'] ?? '';
 ?>
 
@@ -583,7 +594,7 @@ scp ~/.ssh/rsyncnet.pub <span class="text-warning" id="rsnScpUser">USERNAME</spa
 
 <script>
 function escapeHtml(value) {
-    return value.replace(/[&<>"']/g, function(ch) {
+    return String(value).replace(/[&<>"']/g, function(ch) {
         return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch];
     });
 }
@@ -1261,15 +1272,19 @@ function applyRemotePreset(select, form) {
                     $rscFree = (int)$rsc['disk_free_bytes'];
                     $rscPct = $rscTotal > 0 ? round(($rscUsed / $rscTotal) * 100, 1) : 0;
                     $rscBarColor = $rscPct >= 90 ? 'danger' : ($rscPct >= 75 ? 'warning' : 'success');
+                    $useDecimalRemoteBytes = $isBorgBase && ($rsc['borgbase_usage_source'] ?? '') === 'borgbase_api';
+                    $formatRemoteBytes = fn(int $bytes): string => $useDecimalRemoteBytes
+                        ? formatStorageBytesDecimal($bytes)
+                        : \BBS\Services\ServerStats::formatBytes($bytes);
                     ?>
                     <div class="d-flex justify-content-between small text-muted mb-1">
-                        <span><?= \BBS\Services\ServerStats::formatBytes($rscUsed) ?> used</span>
-                        <span><?= \BBS\Services\ServerStats::formatBytes($rscFree) ?> free</span>
+                        <span><?= $formatRemoteBytes($rscUsed) ?> used</span>
+                        <span><?= $formatRemoteBytes($rscFree) ?> free</span>
                     </div>
                     <div class="progress" style="height: 6px;">
                         <div class="progress-bar bg-<?= $rscBarColor ?>" style="width: <?= $rscPct ?>%"></div>
                     </div>
-                    <div class="text-muted small mt-1"><?= \BBS\Services\ServerStats::formatBytes($rscTotal) ?> total &middot; <?= $rscPct ?>% used &middot; checked <?= \BBS\Core\TimeHelper::ago($rsc['disk_checked_at']) ?></div>
+                    <div class="text-muted small mt-1"><?= $formatRemoteBytes($rscTotal) ?> total &middot; <?= $rscPct ?>% used &middot; checked <?= \BBS\Core\TimeHelper::ago($rsc['disk_checked_at']) ?></div>
                     <?php if ($isBorgBase && !empty($rsc['borgbase_usage_source'])): ?>
                     <div class="text-muted small mt-1">Source: <?= $rsc['borgbase_usage_source'] === 'borgbase_api' ? 'BorgBase API' : 'manual quota' ?></div>
                     <?php endif; ?>
@@ -1343,7 +1358,7 @@ function applyRemotePreset(select, form) {
                             <div class="fw-semibold mb-2">BorgBase API</div>
                             <div class="mb-3">
                                 <label class="form-label fw-semibold" for="editBbApiKey<?= $rsc['id'] ?>">API Key <span class="text-muted fw-normal">(optional)</span></label>
-                                <input type="password" class="form-control" name="borgbase_api_key" id="editBbApiKey<?= $rsc['id'] ?>" autocomplete="off" placeholder="<?= !empty($rsc['borgbase_api_key_encrypted']) ? 'Leave blank to keep existing key' : 'Paste API key' ?>" oninput="updateEditBorgbaseApiRequirement(<?= $rsc['id'] ?>)">
+                                <input type="password" class="form-control" name="borgbase_api_key" id="editBbApiKey<?= $rsc['id'] ?>" autocomplete="off" data-has-saved-key="<?= !empty($rsc['borgbase_api_key_encrypted']) ? '1' : '0' ?>" placeholder="<?= !empty($rsc['borgbase_api_key_encrypted']) ? 'Leave blank to keep existing key' : 'Paste API key' ?>" oninput="updateEditBorgbaseApiRequirement(<?= $rsc['id'] ?>)">
                             </div>
                             <div class="mb-3">
                                 <label class="form-label fw-semibold" for="editBbRepoName<?= $rsc['id'] ?>">BorgBase Repo Name <span class="text-danger d-none" id="editBbRepoNameRequired<?= $rsc['id'] ?>">*</span></label>
@@ -1469,33 +1484,62 @@ function testBorgbaseApiExisting(id) {
     var modal = document.getElementById('editRemoteSshModal' + id);
     var userInput = modal ? modal.querySelector('[name=remote_user]') : null;
     var csrfInput = modal ? modal.querySelector('[name=csrf_token]') : null;
+    var fallbackCsrfInput = document.querySelector('input[name=csrf_token]');
+    var apiKey = apiInput ? apiInput.value.trim() : '';
+    var repoName = repoInput ? repoInput.value.trim() : '';
+    var hasSavedKey = apiInput && apiInput.dataset.hasSavedKey === '1';
+    var esc = function(value) {
+        return String(value).replace(/[&<>"']/g, function(ch) {
+            return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch];
+        });
+    };
+
+    if (!apiKey && !hasSavedKey) {
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = '<div class="alert alert-danger small py-2 px-3 mb-0"><i class="bi bi-x-circle me-1"></i> Enter an API key to verify it before saving.</div>';
+        return;
+    }
+    if (!repoName) {
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = '<div class="alert alert-danger small py-2 px-3 mb-0"><i class="bi bi-x-circle me-1"></i> Enter a BorgBase repository name to verify the API key.</div>';
+        updateEditBorgbaseApiRequirement(id);
+        return;
+    }
 
     resultDiv.style.display = 'block';
     resultDiv.innerHTML = '<div class="alert alert-secondary small py-2 px-3 mb-0"><span class="spinner-border spinner-border-sm me-1"></span>Checking BorgBase API...</div>';
 
     var formData = new URLSearchParams();
-    formData.append('csrf_token', csrfInput ? csrfInput.value : '');
+    formData.append('csrf_token', csrfInput ? csrfInput.value : (fallbackCsrfInput ? fallbackCsrfInput.value : ''));
     formData.append('config_id', String(id));
     formData.append('remote_user', userInput ? userInput.value.trim() : '');
-    formData.append('borgbase_repo_name', repoInput ? repoInput.value.trim() : '');
-    formData.append('borgbase_api_key', apiInput ? apiInput.value : '');
+    formData.append('borgbase_repo_name', repoName);
+    formData.append('borgbase_api_key', apiKey);
 
     fetch('/remote-ssh-configs/borgbase-api-test', {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
         body: formData.toString()
     })
-    .then(function(r) { return r.json(); })
+    .then(function(r) {
+        return r.text().then(function(text) {
+            try {
+                return JSON.parse(text || '{}');
+            } catch (e) {
+                throw new Error(text ? text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180) : 'Invalid server response');
+            }
+        });
+    })
     .then(function(data) {
         if (data.status === 'ok') {
             var repo = data.repo || {};
-            resultDiv.innerHTML = '<div class="alert alert-success small py-2 px-3 mb-0"><i class="bi bi-check-circle me-1"></i>Verified — quota ' + escapeHtml(String(repo.quota_gb)) + ' GB, current usage ' + escapeHtml(String(repo.current_usage_mb)) + ' MB</div>';
+            resultDiv.innerHTML = '<div class="alert alert-success small py-2 px-3 mb-0"><i class="bi bi-check-circle me-1"></i>Verified - quota ' + esc(repo.quota_gb) + ' GB, current usage ' + esc(repo.current_usage_mb) + ' MB</div>';
         } else {
-            resultDiv.innerHTML = '<div class="alert alert-danger small py-2 px-3 mb-0"><i class="bi bi-x-circle me-1"></i> ' + escapeHtml(data.error || 'BorgBase API check failed') + '</div>';
+            resultDiv.innerHTML = '<div class="alert alert-danger small py-2 px-3 mb-0"><i class="bi bi-x-circle me-1"></i> ' + esc(data.error || 'BorgBase API check failed') + '</div>';
         }
     })
-    .catch(function() {
-        resultDiv.innerHTML = '<div class="alert alert-danger small py-2 px-3 mb-0"><i class="bi bi-x-circle me-1"></i>Request failed</div>';
+    .catch(function(error) {
+        resultDiv.innerHTML = '<div class="alert alert-danger small py-2 px-3 mb-0"><i class="bi bi-x-circle me-1"></i> ' + esc(error && error.message ? error.message : 'Request failed') + '</div>';
     });
 }
 
