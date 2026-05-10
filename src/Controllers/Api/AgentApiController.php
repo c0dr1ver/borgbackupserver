@@ -81,7 +81,11 @@ class AgentApiController extends Controller
 
         $notifService->resolve('agent_offline', $agent['id'], null);
 
-        // If agent was offline and is now back online, send agent_online notification
+        // If agent was offline and is now back online, send agent_online
+        // notification AND write a server_log row so the reconnect is
+        // visible in the log timeline alongside the original offline sweep
+        // (which writes its own log row from scheduler.php). Without this,
+        // the log shows only the offline event, not the recovery (#249).
         if ($wasOffline) {
             $notifService->notify(
                 'agent_online',
@@ -90,6 +94,11 @@ class AgentApiController extends Controller
                 "Client \"{$agent['name']}\" is back online",
                 'info'
             );
+            $this->db->insert('server_log', [
+                'agent_id' => $agent['id'],
+                'level' => 'info',
+                'message' => "Client \"{$agent['name']}\" is back online",
+            ]);
         }
 
         return $agent;
@@ -427,9 +436,9 @@ class AgentApiController extends Controller
             ]);
 
             // Update archive count + borg version. Size is refreshed below
-            // via RepositorySizeService (du for local, SUM for remote SSH) —
-            // runs once per backup instead of a periodic scan, so idle disks
-            // stay idle.
+            // via RepositorySizeService (du locally; du-then-borg-info over
+            // SSH) — runs once per backup instead of a periodic scan, so
+            // idle disks stay idle.
             $borgVer = !empty($agent['borg_version']) ? preg_replace('/^borg\s+/', '', $agent['borg_version']) : null;
             $this->db->query("
                 UPDATE repositories SET

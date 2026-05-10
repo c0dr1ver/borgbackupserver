@@ -63,6 +63,84 @@ class AdminApiController extends Controller
         $this->json(['clients' => $agents]);
     }
 
+    public function summary(): void
+    {
+        $this->requireApiToken();
+
+        // Latest terminal backup job per plan, computed once via ROW_NUMBER()
+        // ordered by completed_at (the previous correlated subquery did the
+        // equivalent per-row, which scaled as O(plans × jobs)).
+        $rows = $this->db->fetchAll("
+            SELECT
+                a.id AS client_id,
+                a.name AS client_name,
+                a.status AS client_status,
+                bp.id AS backup_plan_id,
+                bp.name AS backup_plan_name,
+                bp.enabled AS backup_plan_enabled,
+                bp.repository_id AS repository_id,
+                r.name AS repository_name,
+                bj.id AS last_backup_job_id,
+                bj.status AS last_backup_result,
+                bj.duration_seconds AS last_backup_duration_seconds,
+                bj.queued_at AS last_backup_queued_at,
+                bj.started_at AS last_backup_started_at,
+                bj.completed_at AS last_backup_completed_at
+            FROM agents a
+            LEFT JOIN backup_plans bp ON bp.agent_id = a.id
+            LEFT JOIN repositories r ON r.id = bp.repository_id
+            LEFT JOIN (
+                SELECT id, backup_plan_id, status, duration_seconds,
+                       queued_at, started_at, completed_at,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY backup_plan_id
+                           ORDER BY completed_at DESC, id DESC
+                       ) AS rn
+                FROM backup_jobs
+                WHERE task_type = 'backup'
+                  AND status IN ('completed', 'failed')
+            ) bj ON bj.backup_plan_id = bp.id AND bj.rn = 1
+            ORDER BY a.name, bp.name
+        ");
+
+        $clients = [];
+        foreach ($rows as $row) {
+            $clientId = (int) $row['client_id'];
+            if (!isset($clients[$clientId])) {
+                $clients[$clientId] = [
+                    'id' => $clientId,
+                    'name' => $row['client_name'],
+                    'status' => $row['client_status'],
+                    'backup_plans' => [],
+                ];
+            }
+
+            if ($row['backup_plan_id'] === null) {
+                continue;
+            }
+
+            $clients[$clientId]['backup_plans'][] = [
+                'id' => (int) $row['backup_plan_id'],
+                'name' => $row['backup_plan_name'],
+                'enabled' => (bool) $row['backup_plan_enabled'],
+                'repository_id' => $row['repository_id'] !== null ? (int) $row['repository_id'] : null,
+                'repository_name' => $row['repository_name'],
+                'last_backup' => $row['last_backup_job_id'] === null ? null : [
+                    'job_id' => (int) $row['last_backup_job_id'],
+                    'result' => $row['last_backup_result'],
+                    'duration_seconds' => $row['last_backup_duration_seconds'] !== null ? (int) $row['last_backup_duration_seconds'] : null,
+                    'queued_at' => $row['last_backup_queued_at'],
+                    'started_at' => $row['last_backup_started_at'],
+                    'completed_at' => $row['last_backup_completed_at'],
+                ],
+            ];
+        }
+
+        $this->json([
+            'clients' => array_values($clients),
+        ]);
+    }
+
     public function getClient(int $id): void
     {
         $this->requireApiToken();

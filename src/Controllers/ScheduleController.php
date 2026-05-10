@@ -183,30 +183,69 @@ class ScheduleController extends Controller
             ORDER BY a.name, bp.name
         ", $agentParams);
 
-        // Median-duration estimate per plan: last 10 successful backup jobs.
-        $planIds = array_unique(array_map(fn($s) => (int) $s['backup_plan_id'], $schedules));
+        // Median-duration estimate per plan: last 10 successful backup jobs
+        // within the last 30 days. Bounded so this scales on long-running
+        // installs with thousands of historical jobs.
+        $planIds = array_values(array_unique(array_map(fn($s) => (int) $s['backup_plan_id'], $schedules)));
         $durations = [];
         if (!empty($planIds)) {
             $placeholders = implode(',', array_fill(0, count($planIds), '?'));
             $rows = $this->db->fetchAll("
                 SELECT backup_plan_id, duration_seconds
-                FROM backup_jobs
-                WHERE backup_plan_id IN ({$placeholders})
-                  AND status = 'completed' AND task_type = 'backup'
-                  AND duration_seconds IS NOT NULL AND duration_seconds > 0
-                ORDER BY completed_at DESC
+                FROM (
+                    SELECT backup_plan_id, duration_seconds,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY backup_plan_id
+                               ORDER BY completed_at DESC
+                           ) AS rn
+                    FROM backup_jobs
+                    WHERE backup_plan_id IN ({$placeholders})
+                      AND status = 'completed' AND task_type = 'backup'
+                      AND duration_seconds IS NOT NULL AND duration_seconds > 0
+                      AND completed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                ) ranked
+                WHERE rn <= 10
             ", $planIds);
             $byPlan = [];
             foreach ($rows as $r) {
                 $pid = (int) $r['backup_plan_id'];
                 if (!isset($byPlan[$pid])) $byPlan[$pid] = [];
-                if (count($byPlan[$pid]) < 10) {
-                    $byPlan[$pid][] = (int) $r['duration_seconds'];
-                }
+                $byPlan[$pid][] = (int) $r['duration_seconds'];
             }
             foreach ($byPlan as $pid => $ds) {
                 sort($ds);
                 $durations[$pid] = $ds[(int) (count($ds) / 2)];
+            }
+        }
+
+        // Latest terminal backup result per plan. Bounded to the last 30 days
+        // and limited to one row per plan via ROW_NUMBER().
+        $latestJobs = [];
+        if (!empty($planIds)) {
+            $placeholders = implode(',', array_fill(0, count($planIds), '?'));
+            $rows = $this->db->fetchAll("
+                SELECT id, backup_plan_id, status, completed_at
+                FROM (
+                    SELECT id, backup_plan_id, status, completed_at,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY backup_plan_id
+                               ORDER BY completed_at DESC, id DESC
+                           ) AS rn
+                    FROM backup_jobs
+                    WHERE backup_plan_id IN ({$placeholders})
+                      AND task_type = 'backup'
+                      AND status IN ('completed', 'failed')
+                      AND completed_at IS NOT NULL
+                      AND completed_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                ) ranked
+                WHERE rn = 1
+            ", $planIds);
+            foreach ($rows as $r) {
+                $latestJobs[(int) $r['backup_plan_id']] = [
+                    'id' => (int) $r['id'],
+                    'status' => $r['status'],
+                    'completed_at' => $r['completed_at'],
+                ];
             }
         }
 
@@ -292,8 +331,48 @@ class ScheduleController extends Controller
                         'estimated' => $estimated,
                         'frequency' => $s['frequency'],
                         'time_label' => $is24h ? $schedDate->format('H:i') : $schedDate->format('g:i A'),
+                        'scheduled_at_utc' => (clone $schedDate)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'),
+                        'job_status' => null,
+                        'failed_job_id' => null,
+                        'has_error' => false,
                     ];
                 }
+            }
+        }
+
+        // The blocks above are laid out in the *current* week. If the latest
+        // failure happened in a previous week, every block's scheduled_at_utc
+        // will sit after $completedTs and the strict "scheduled before failure"
+        // filter would lose the error state. Fall back to the most recent past
+        // block (relative to now) for the plan — a later success would have
+        // already displaced this entry from $latestJobs.
+        $nowTs = time();
+        foreach ($latestJobs as $planId => $job) {
+            if (($job['status'] ?? '') !== 'failed') continue;
+            $completedTs = strtotime($job['completed_at'] ?? '') ?: 0;
+            $bestIdx = null;
+            $bestTs = null;
+            $fallbackIdx = null;
+            $fallbackTs = null;
+
+            foreach ($blocks as $idx => $block) {
+                if ((int) $block['plan_id'] !== (int) $planId) continue;
+                $scheduledTs = strtotime($block['scheduled_at_utc'] ?? '') ?: 0;
+                if ($scheduledTs <= $completedTs && ($bestTs === null || $scheduledTs > $bestTs)) {
+                    $bestIdx = $idx;
+                    $bestTs = $scheduledTs;
+                }
+                if ($scheduledTs <= $nowTs && ($fallbackTs === null || $scheduledTs > $fallbackTs)) {
+                    $fallbackIdx = $idx;
+                    $fallbackTs = $scheduledTs;
+                }
+            }
+
+            $targetIdx = $bestIdx ?? $fallbackIdx;
+            if ($targetIdx !== null) {
+                $blocks[$targetIdx]['job_status'] = 'failed';
+                $blocks[$targetIdx]['failed_job_id'] = (int) $job['id'];
+                $blocks[$targetIdx]['has_error'] = true;
             }
         }
 

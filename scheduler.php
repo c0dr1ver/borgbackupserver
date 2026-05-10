@@ -36,15 +36,45 @@ $stale = $db->query(
 
 if ($stale->rowCount() > 0) {
     echo date('Y-m-d H:i:s') . " Marked {$stale->rowCount()} agent(s) offline (no heartbeat in {$threshold}s)\n";
+}
 
-    // Notify for each agent that just went offline
+// Hysteresis on agent_offline notifications: only fire once the agent has
+// been continuously offline for >= agent_offline_notify_minutes (default 5).
+// BBS isn't a real-time monitoring system — sub-minute detection is too
+// noisy on residential ISPs and laptops, where short network blips cause
+// status to flap several times an hour. The agent's *status* still flips
+// to offline at the 90s threshold above (so dashboards and queues react
+// quickly), but the user-visible notification + push/email dispatch waits
+// for the longer threshold. Only fires once per outage by checking for
+// an unresolved agent_offline notification for the agent.
+$notifyMinutes = max(1, (int) ($db->fetchOne("SELECT `value` FROM settings WHERE `key` = 'agent_offline_notify_minutes'")['value'] ?? 5));
+$notifyThresholdSec = $notifyMinutes * 60;
+$notifyCutoff = date('Y-m-d H:i:s', time() - $notifyThresholdSec);
+
+$candidates = $db->fetchAll(
+    "SELECT a.id, a.name
+       FROM agents a
+       LEFT JOIN notifications n
+         ON n.type = 'agent_offline'
+        AND n.agent_id = a.id
+        AND n.resolved_at IS NULL
+      WHERE a.status = 'offline'
+        AND a.last_heartbeat IS NOT NULL
+        AND a.last_heartbeat < ?
+        AND n.id IS NULL",
+    [$notifyCutoff]
+);
+
+if (!empty($candidates)) {
     $notificationService = new NotificationService();
-    $offlineAgents = $db->fetchAll(
-        "SELECT id, name FROM agents WHERE status = 'offline' AND last_heartbeat IS NOT NULL AND last_heartbeat < ?",
-        [$cutoff]
-    );
-    foreach ($offlineAgents as $offAgent) {
-        $notificationService->notify('agent_offline', $offAgent['id'], null, "Client \"{$offAgent['name']}\" is offline (no heartbeat in {$threshold}s)", 'warning');
+    foreach ($candidates as $offAgent) {
+        $notificationService->notify(
+            'agent_offline',
+            $offAgent['id'],
+            null,
+            "Client \"{$offAgent['name']}\" has been offline for at least {$notifyMinutes} minute" . ($notifyMinutes === 1 ? '' : 's'),
+            'warning'
+        );
     }
 }
 
@@ -57,7 +87,8 @@ if ($stale->rowCount() > 0) {
 //     client's laptop was asleep (#144). They get their own grace-period sweep
 //     in Step 2c below.
 $staleJobs = $db->fetchAll("
-    SELECT bj.id, bj.agent_id, bj.task_type, bj.backup_plan_id, bj.status, a.name as agent_name
+    SELECT bj.id, bj.agent_id, bj.task_type, bj.backup_plan_id, bj.repository_id,
+           bj.status, bj.retry_count, a.name as agent_name
     FROM backup_jobs bj
     JOIN agents a ON a.id = bj.agent_id
     WHERE bj.status IN ('sent', 'running')
@@ -65,31 +96,78 @@ $staleJobs = $db->fetchAll("
       AND bj.task_type NOT IN ('prune', 'compact', 's3_sync', 's3_restore', 'repo_check', 'repo_repair', 'break_lock', 'catalog_sync', 'catalog_rebuild', 'catalog_rebuild_full', 'archive_delete', 'update_borg', 'update_agent')
 ");
 
+// Auto-retry settings (#249). Only kicks in for offline-induced backup
+// failures; real errors (borg path missing, encryption failed, etc.) are
+// reported by the agent via /api/agent/status and never enter this sweep.
+$autoRetryEnabled = (($db->fetchOne("SELECT `value` FROM settings WHERE `key` = 'auto_retry_failed_backups'")['value'] ?? '1') === '1');
+$autoRetryMax = max(0, (int) ($db->fetchOne("SELECT `value` FROM settings WHERE `key` = 'auto_retry_max_attempts'")['value'] ?? 3));
+
 foreach ($staleJobs as $sj) {
+    $isBackup = ($sj['task_type'] === 'backup' && !empty($sj['backup_plan_id']));
+    $attempt = ((int) $sj['retry_count']) + 1;
+    $willRetry = $isBackup && $autoRetryEnabled && $attempt <= $autoRetryMax;
+
+    $errorLog = $willRetry
+        ? "Agent offline during backup — rescheduled (attempt {$attempt} of {$autoRetryMax}) for when agent reconnects"
+        : ($isBackup && $autoRetryEnabled
+            ? "Agent went offline — no heartbeat in {$threshold}s; retry limit ({$autoRetryMax}) exhausted"
+            : "Agent went offline — no heartbeat in {$threshold}s");
+
     $db->update('backup_jobs', [
         'status' => 'failed',
         'completed_at' => date('Y-m-d H:i:s'),
-        'error_log' => "Agent went offline — no heartbeat in {$threshold}s",
+        'error_log' => $errorLog,
     ], 'id = ?', [$sj['id']]);
+
+    if ($willRetry) {
+        // Re-queue the same plan; agent picks it up when it reconnects.
+        // parent_job_id chains the retries so the UI can show history.
+        $db->insert('backup_jobs', [
+            'backup_plan_id' => $sj['backup_plan_id'],
+            'agent_id' => $sj['agent_id'],
+            'repository_id' => $sj['repository_id'],
+            'task_type' => 'backup',
+            'status' => 'queued',
+            'retry_count' => $attempt,
+            'parent_job_id' => $sj['id'],
+        ]);
+        $db->insert('server_log', [
+            'agent_id' => $sj['agent_id'],
+            'backup_job_id' => $sj['id'],
+            'level' => 'info',
+            'message' => "Agent \"{$sj['agent_name']}\" went offline during backup — rescheduled (attempt {$attempt} of {$autoRetryMax}) for when agent reconnects",
+        ]);
+        echo date('Y-m-d H:i:s') . " Re-queued: plan {$sj['backup_plan_id']} (attempt {$attempt}/{$autoRetryMax}) — agent \"{$sj['agent_name']}\" offline\n";
+        continue;
+    }
 
     $db->insert('server_log', [
         'agent_id' => $sj['agent_id'],
         'backup_job_id' => $sj['id'],
-        'level' => 'warning',
-        'message' => "Job #{$sj['id']} ({$sj['task_type']}) failed — agent \"{$sj['agent_name']}\" went offline",
+        'level' => 'error',
+        'message' => "Job #{$sj['id']} ({$sj['task_type']}) failed — agent \"{$sj['agent_name']}\" went offline"
+                     . ($isBackup && $autoRetryEnabled ? " (retry limit {$autoRetryMax} exhausted)" : ""),
     ]);
 
-    // Fire backup_failed notification if it was a backup
-    if ($sj['task_type'] === 'backup' && $sj['backup_plan_id']) {
+    // Fire backup_failed notification if it was a backup. When auto-retry
+    // is exhausted (or disabled), force the email so dedup doesn't swallow
+    // the terminal failure.
+    if ($isBackup) {
         $notificationService = $notificationService ?? new NotificationService();
         $planRow = $db->fetchOne("SELECT name FROM backup_plans WHERE id = ?", [$sj['backup_plan_id']]);
         $planName = $planRow['name'] ?? '';
+        $exhausted = $autoRetryEnabled && $autoRetryMax > 0;
+        $msg = $exhausted
+            ? "Backup failed for plan \"{$planName}\" on client \"{$sj['agent_name']}\" — agent went offline; retry limit ({$autoRetryMax}) exhausted"
+            : "Backup failed for plan \"{$planName}\" on client \"{$sj['agent_name']}\" — agent went offline";
         $notificationService->notify(
             'backup_failed',
             $sj['agent_id'],
             (int)$sj['backup_plan_id'],
-            "Backup failed for plan \"{$planName}\" on client \"{$sj['agent_name']}\" — agent went offline",
-            'critical'
+            $msg,
+            'critical',
+            null,
+            $exhausted // forceEmail on retry exhaustion
         );
     }
 
@@ -777,10 +855,17 @@ foreach ($serverJobs as $sj) {
                 echo date('Y-m-d H:i:s') . "   Catalog sync {$archiveCount}/{$totalArchiveCount}: {$archiveName}\n";
             }
 
-            // Update repo stats
+            // Repo size: prefer borg's own dedup-aware unique_csize over the
+            // sum of per-archive deduplicated_size, which is the *incremental*
+            // contribution at archive-creation time and goes wrong as soon as
+            // anything is pruned/compacted (#258).
+            $sshUnixUser = $sj['ssh_unix_user'] ?? null;
+            $repoUniqueSize = \BBS\Services\RepositorySizeService::fetchRepoUniqueCsize($csRepo, $sshUnixUser);
+            $sizeForRepo = $repoUniqueSize ?? $totalSize;
+
             $db->update('repositories', [
                 'archive_count' => $archiveCount,
-                'size_bytes' => $totalSize,
+                'size_bytes' => $sizeForRepo,
             ], 'id = ?', [$csRepo['id']]);
 
             $db->update('backup_jobs', [
@@ -1595,8 +1680,8 @@ foreach ($serverJobs as $sj) {
                 ]);
             }
             // Refresh archive count + size. Prune just shrank the repo,
-            // so measure actual disk usage now (local) or re-sum archives
-            // (remote SSH) — see RepositorySizeService.
+            // so measure actual disk usage now — see RepositorySizeService
+            // for the local/remote chain.
             $db->query(
                 "UPDATE repositories SET archive_count = (SELECT COUNT(*) FROM archives WHERE repository_id = ?) WHERE id = ?",
                 [$repoId, $repoId]
