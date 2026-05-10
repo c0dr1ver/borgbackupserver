@@ -1379,7 +1379,19 @@ $renderRepoCheckboxes = function (array $selectedIds = []) use ($reposByAgent) {
                                     <span class="input-group-text">GB</span>
                                 </div>
                             </div>
-                            <div class="col-lg-4">
+                            <div class="col-lg-3">
+                                <label class="form-label fw-semibold d-block">
+                                    Strict mode
+                                    <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline" data-bs-toggle="tooltip" data-bs-placement="top" title="When enabled, backup jobs for repositories assigned to this Virtual Storage will not start if the customer's used space exceeds the Virtual Storage quota.">
+                                        <i class="bi bi-question-circle"></i>
+                                    </button>
+                                </label>
+                                <div class="form-check form-switch pt-1">
+                                    <input class="form-check-input" type="checkbox" role="switch" name="strict_mode" value="1" id="virtualStorageStrictModeNew">
+                                    <label class="form-check-label small" for="virtualStorageStrictModeNew">Block backups over quota</label>
+                                </div>
+                            </div>
+                            <div class="col-12">
                                 <label class="form-label fw-semibold">Repositories</label>
                                 <?= $renderRepoCheckboxes() ?>
                             </div>
@@ -1445,6 +1457,11 @@ $renderRepoCheckboxes = function (array $selectedIds = []) use ($reposByAgent) {
                         <div class="text-muted small mt-1">
                             <?= formatStorageBytes($quota) ?> quota &middot; <?= $pct ?>% used
                         </div>
+                        <?php if (!empty($vs['strict_mode'])): ?>
+                        <div class="mt-2">
+                            <span class="badge text-bg-danger"><i class="bi bi-shield-lock me-1"></i>Strict mode</span>
+                        </div>
+                        <?php endif; ?>
                         <div class="mt-2 small text-muted">
                             <i class="bi bi-archive me-1"></i><?= count($vs['repositories']) ?> repo<?= count($vs['repositories']) === 1 ? '' : 's' ?>
                         </div>
@@ -1490,6 +1507,18 @@ $renderRepoCheckboxes = function (array $selectedIds = []) use ($reposByAgent) {
                                         <div class="input-group">
                                             <input type="number" class="form-control" name="quota_gb" min="1" step="1" value="<?= (int) ceil($quota / 1073741824) ?>" required>
                                             <span class="input-group-text">GB</span>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-semibold d-block">
+                                            Strict mode
+                                            <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline" data-bs-toggle="tooltip" data-bs-placement="top" title="When enabled, backup jobs for repositories assigned to this Virtual Storage will not start if the customer's used space exceeds the Virtual Storage quota.">
+                                                <i class="bi bi-question-circle"></i>
+                                            </button>
+                                        </label>
+                                        <div class="form-check form-switch pt-1">
+                                            <input class="form-check-input" type="checkbox" role="switch" name="strict_mode" value="1" id="virtualStorageStrictMode<?= (int) $vs['id'] ?>" <?= !empty($vs['strict_mode']) ? 'checked' : '' ?>>
+                                            <label class="form-check-label small" for="virtualStorageStrictMode<?= (int) $vs['id'] ?>">Block backups over quota</label>
                                         </div>
                                     </div>
                                     <div class="col-12">

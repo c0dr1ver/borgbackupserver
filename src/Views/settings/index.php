@@ -1893,6 +1893,12 @@ document.getElementById('appIconFileInput').addEventListener('change', function(
                 <tr><td><span class="badge bg-primary">POST</span></td><td><code>/api/v1/clients/{id}/plugin-configs</code></td><td>Create a plugin config</td></tr>
                 <tr><td colspan="3" class="text-muted small fw-semibold pt-2">Storage</td></tr>
                 <tr><td><span class="badge bg-success">GET</span></td><td><code>/api/v1/storage</code></td><td>List local &amp; remote SSH storage locations</td></tr>
+                <tr><td colspan="3" class="text-muted small fw-semibold pt-2">Virtual Storage</td></tr>
+                <tr><td><span class="badge bg-success">GET</span></td><td><code>/api/v1/virtual-storages</code></td><td>List virtual disks with owner, quota, usage, repositories, and <code>strict_mode</code></td></tr>
+                <tr><td><span class="badge bg-primary">POST</span></td><td><code>/api/v1/virtual-storages</code></td><td>Create a virtual disk with quota, owner, repositories, and optional <code>strict_mode</code></td></tr>
+                <tr><td><span class="badge bg-success">GET</span></td><td><code>/api/v1/virtual-storages/{id}</code></td><td>Get virtual disk details, quota usage, and assigned repositories</td></tr>
+                <tr><td><span class="badge bg-warning text-dark">PUT</span></td><td><code>/api/v1/virtual-storages/{id}</code></td><td>Update virtual disk quota, owner, repositories, or <code>strict_mode</code></td></tr>
+                <tr><td><span class="badge bg-danger">DELETE</span></td><td><code>/api/v1/virtual-storages/{id}</code></td><td>Delete a virtual disk allocation</td></tr>
             </tbody>
         </table>
 

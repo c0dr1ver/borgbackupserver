@@ -9,6 +9,7 @@ class QueueManager
     private Database $db;
     private int $maxQueue;
     private ?int $sshPort = null;
+    private ?VirtualStorageService $virtualStorageService = null;
 
     public function __construct()
     {
@@ -39,6 +40,49 @@ class QueueManager
             return (int) $agent['ssh_port_override'];
         }
         return $this->getSshPort();
+    }
+
+    private function getVirtualStorageService(): VirtualStorageService
+    {
+        if ($this->virtualStorageService === null) {
+            $this->virtualStorageService = new VirtualStorageService();
+        }
+        return $this->virtualStorageService;
+    }
+
+    private function failJobForStrictQuota(array $job, array $block): void
+    {
+        $message = sprintf(
+            'Repository disk space limit exceeded: virtual storage "%s" is using %s of %s (%s over quota). Backup job for repository "%s" will not start.',
+            $block['virtual_storage_name'],
+            ServerStats::formatBytes((int) $block['used_bytes']),
+            ServerStats::formatBytes((int) $block['quota_bytes']),
+            ServerStats::formatBytes((int) $block['overage_bytes']),
+            $block['repository_name']
+        );
+
+        $this->db->update('backup_jobs', [
+            'status' => 'failed',
+            'completed_at' => date('Y-m-d H:i:s'),
+            'error_log' => $message,
+            'status_message' => 'Virtual storage quota exceeded',
+        ], 'id = ?', [$job['id']]);
+
+        $this->db->insert('server_log', [
+            'agent_id' => $job['agent_id'],
+            'backup_job_id' => $job['id'],
+            'level' => 'error',
+            'message' => $message,
+        ]);
+    }
+
+    private function strictQuotaBlockForJob(array $job): ?array
+    {
+        if (($job['task_type'] ?? '') !== 'backup' || empty($job['repository_id'])) {
+            return null;
+        }
+
+        return $this->getVirtualStorageService()->getStrictQuotaBlockForRepository((int) $job['repository_id']);
     }
 
     /**
@@ -163,6 +207,13 @@ class QueueManager
             if ($job['repository_id'] && in_array($job['repository_id'], $busyRepoIds)) {
                 continue;
             }
+
+            $strictQuotaBlock = $this->strictQuotaBlockForJob($job);
+            if ($strictQuotaBlock) {
+                $this->failJobForStrictQuota($job, $strictQuotaBlock);
+                continue;
+            }
+
             // Build the task payload
             $repo = [
                 'path' => $job['repo_path'],
@@ -355,6 +406,12 @@ class QueueManager
 
         $tasks = [];
         foreach ($jobs as $job) {
+            $strictQuotaBlock = $this->strictQuotaBlockForJob($job);
+            if ($strictQuotaBlock) {
+                $this->failJobForStrictQuota($job, $strictQuotaBlock);
+                continue;
+            }
+
             $repo = [
                 'path' => $job['repo_path'],
                 'encryption' => $job['encryption'],

@@ -414,8 +414,8 @@ class StorageLocationController extends Controller
         $this->requireAdmin();
         $this->verifyCsrf();
 
-        [$name, $userId, $quotaBytes, $repoIds] = $this->readVirtualStorageInput();
-        (new VirtualStorageService())->create($name, $userId, $quotaBytes, $repoIds);
+        [$name, $userId, $quotaBytes, $repoIds, $strictMode] = $this->readVirtualStorageInput();
+        (new VirtualStorageService())->create($name, $userId, $quotaBytes, $repoIds, $strictMode);
 
         $this->flash('success', "Virtual storage \"{$name}\" created.");
         $this->redirect('/storage-locations');
@@ -432,8 +432,8 @@ class StorageLocationController extends Controller
             $this->redirect('/storage-locations');
         }
 
-        [$name, $userId, $quotaBytes, $repoIds] = $this->readVirtualStorageInput();
-        (new VirtualStorageService())->update($id, $name, $userId, $quotaBytes, $repoIds);
+        [$name, $userId, $quotaBytes, $repoIds, $strictMode] = $this->readVirtualStorageInput();
+        (new VirtualStorageService())->update($id, $name, $userId, $quotaBytes, $repoIds, $strictMode);
 
         $this->flash('success', "Virtual storage \"{$name}\" updated.");
         $this->redirect('/storage-locations');
@@ -454,6 +454,7 @@ class StorageLocationController extends Controller
         $name = trim($_POST['name'] ?? '');
         $userId = (int) ($_POST['user_id'] ?? 0);
         $repoIds = $_POST['repositories'] ?? [];
+        $strictMode = !empty($_POST['strict_mode']);
 
         if ($name === '') {
             $this->flash('danger', 'Virtual storage name is required.');
@@ -483,7 +484,7 @@ class StorageLocationController extends Controller
             $this->redirect('/storage-locations');
         }
 
-        return [$name, $userId, $quotaBytes, $repoIds];
+        return [$name, $userId, $quotaBytes, $repoIds, $strictMode];
     }
 
     /**

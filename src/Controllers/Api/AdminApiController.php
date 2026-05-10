@@ -6,6 +6,7 @@ use BBS\Core\Controller;
 use BBS\Services\BorgCommandBuilder;
 use BBS\Services\Encryption;
 use BBS\Services\SshKeyManager;
+use BBS\Services\VirtualStorageService;
 
 class AdminApiController extends Controller
 {
@@ -43,6 +44,20 @@ class AdminApiController extends Controller
         }
 
         return null;
+    }
+
+    private function boolFromInput($value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_numeric($value)) {
+            return (int) $value === 1;
+        }
+        if (is_string($value)) {
+            return in_array(strtolower($value), ['1', 'true', 'yes', 'on'], true);
+        }
+        return !empty($value);
     }
 
     // ── Clients ──────────────────────────────────────────
@@ -810,6 +825,160 @@ class AdminApiController extends Controller
             'local' => $locations,
             'remote_ssh' => $remoteConfigs,
         ]);
+    }
+
+    // ── Virtual Storage ─────────────────────────────────
+
+    public function listVirtualStorages(): void
+    {
+        $this->requireApiToken();
+
+        $this->json(['virtual_storages' => $this->virtualStorageService()->getAll()]);
+    }
+
+    public function getVirtualStorage(int $id): void
+    {
+        $this->requireApiToken();
+
+        $virtualStorage = $this->virtualStorageService()->getById($id);
+        if (!$virtualStorage) {
+            $this->json(['error' => 'Virtual storage not found'], 404);
+        }
+
+        $this->json(['virtual_storage' => $virtualStorage]);
+    }
+
+    public function createVirtualStorage(): void
+    {
+        $this->requireApiToken();
+        $input = $this->getJsonInput();
+
+        $name = trim($input['name'] ?? '');
+        $userId = (int) ($input['user_id'] ?? 0);
+        $repoIds = $this->repositoryIdsFromInput($input['repository_ids'] ?? null, true);
+        $quotaBytes = $this->requiredVirtualStorageQuota($input);
+        $strictMode = $this->boolFromInput($input['strict_mode'] ?? false);
+
+        $this->validateVirtualStorageOwner($userId);
+        if ($name === '') {
+            $this->json(['error' => 'name is required'], 400);
+        }
+
+        $service = $this->virtualStorageService();
+        $id = $service->create($name, $userId, $quotaBytes, $repoIds, $strictMode);
+
+        $this->db->insert('server_log', [
+            'level' => 'info',
+            'message' => sprintf('Virtual storage "%s" created via API', $name),
+        ]);
+
+        $this->json(['virtual_storage' => $service->getById($id)], 201);
+    }
+
+    public function updateVirtualStorage(int $id): void
+    {
+        $this->requireApiToken();
+        $input = $this->getJsonInput();
+
+        $service = $this->virtualStorageService();
+        $existing = $service->getById($id);
+        if (!$existing) {
+            $this->json(['error' => 'Virtual storage not found'], 404);
+        }
+
+        $name = array_key_exists('name', $input) ? trim($input['name'] ?? '') : $existing['name'];
+        if ($name === '') {
+            $this->json(['error' => 'name cannot be empty'], 400);
+        }
+
+        $userId = array_key_exists('user_id', $input) ? (int) $input['user_id'] : (int) $existing['user_id'];
+        $this->validateVirtualStorageOwner($userId);
+
+        $quotaBytes = (array_key_exists('quota_gb', $input) || array_key_exists('quota_bytes', $input))
+            ? $this->requiredVirtualStorageQuota($input)
+            : (int) $existing['quota_bytes'];
+
+        $repoIds = array_key_exists('repository_ids', $input)
+            ? $this->repositoryIdsFromInput($input['repository_ids'], true)
+            : array_map('intval', $existing['repository_ids'] ?? []);
+
+        $strictMode = array_key_exists('strict_mode', $input)
+            ? $this->boolFromInput($input['strict_mode'])
+            : !empty($existing['strict_mode']);
+
+        $service->update($id, $name, $userId, $quotaBytes, $repoIds, $strictMode);
+
+        $this->db->insert('server_log', [
+            'level' => 'info',
+            'message' => sprintf('Virtual storage "%s" updated via API', $name),
+        ]);
+
+        $this->json(['virtual_storage' => $service->getById($id)]);
+    }
+
+    public function deleteVirtualStorage(int $id): void
+    {
+        $this->requireApiToken();
+
+        $service = $this->virtualStorageService();
+        $existing = $service->getById($id);
+        if (!$existing) {
+            $this->json(['error' => 'Virtual storage not found'], 404);
+        }
+
+        $service->delete($id);
+        $this->db->insert('server_log', [
+            'level' => 'info',
+            'message' => sprintf('Virtual storage "%s" deleted via API', $existing['name']),
+        ]);
+
+        $this->json(['status' => 'ok', 'message' => "Virtual storage \"{$existing['name']}\" deleted"]);
+    }
+
+    private function virtualStorageService(): VirtualStorageService
+    {
+        return new VirtualStorageService();
+    }
+
+    private function requiredVirtualStorageQuota(array $input): int
+    {
+        $quotaBytes = $this->quotaBytesFromInput($input);
+        if (!$quotaBytes) {
+            $this->json(['error' => 'quota_gb or quota_bytes must be greater than zero'], 400);
+        }
+        return (int) $quotaBytes;
+    }
+
+    private function repositoryIdsFromInput($value, bool $required): array
+    {
+        if (!is_array($value)) {
+            if ($required) {
+                $this->json(['error' => 'repository_ids must be a non-empty array'], 400);
+            }
+            return [];
+        }
+
+        $repoIds = array_values(array_unique(array_filter(array_map('intval', $value))));
+        if ($required && empty($repoIds)) {
+            $this->json(['error' => 'repository_ids must contain at least one repository id'], 400);
+        }
+
+        foreach ($repoIds as $repoId) {
+            $repo = $this->db->fetchOne("SELECT id FROM repositories WHERE id = ?", [$repoId]);
+            if (!$repo) {
+                $this->json(['error' => "Repository {$repoId} not found"], 404);
+            }
+        }
+
+        return $repoIds;
+    }
+
+    private function validateVirtualStorageOwner(int $userId): void
+    {
+        $user = $this->db->fetchOne("SELECT id, role FROM users WHERE id = ?", [$userId]);
+        if (!$user || ($user['role'] ?? '') === 'admin') {
+            $this->json(['error' => 'user_id must reference a non-admin user'], 400);
+        }
     }
 
     // ── Remote SSH Repos ────────────────────────────────

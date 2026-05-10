@@ -291,6 +291,11 @@ class App
         $this->router->map('GET', '/api/v1/clients/[i:id]/plugin-configs', 'Api\\AdminApiController@listPluginConfigs');
         $this->router->map('POST', '/api/v1/clients/[i:id]/plugin-configs', 'Api\\AdminApiController@createPluginConfig');
         $this->router->map('GET', '/api/v1/storage', 'Api\\AdminApiController@listStorageLocations');
+        $this->router->map('GET', '/api/v1/virtual-storages', 'Api\\AdminApiController@listVirtualStorages');
+        $this->router->map('POST', '/api/v1/virtual-storages', 'Api\\AdminApiController@createVirtualStorage');
+        $this->router->map('GET', '/api/v1/virtual-storages/[i:id]', 'Api\\AdminApiController@getVirtualStorage');
+        $this->router->map('PUT', '/api/v1/virtual-storages/[i:id]', 'Api\\AdminApiController@updateVirtualStorage');
+        $this->router->map('DELETE', '/api/v1/virtual-storages/[i:id]', 'Api\\AdminApiController@deleteVirtualStorage');
 
         // Catalog & Restore (client-facing)
         $this->router->map('GET', '/clients/[i:id]/catalog/[i:archive_id]', 'ClientController@catalog');

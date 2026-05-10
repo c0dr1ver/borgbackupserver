@@ -70,7 +70,19 @@ class VirtualStorageService
         ", [$userId]));
     }
 
-    public function create(string $name, int $userId, int $quotaBytes, array $repoIds): int
+    public function getById(int $id): ?array
+    {
+        $rows = $this->decorate($this->db->fetchAll("
+            SELECT vs.*, u.username, u.email
+            FROM virtual_storages vs
+            JOIN users u ON u.id = vs.user_id
+            WHERE vs.id = ?
+        ", [$id]));
+
+        return $rows[0] ?? null;
+    }
+
+    public function create(string $name, int $userId, int $quotaBytes, array $repoIds, bool $strictMode = false): int
     {
         $this->db->getPdo()->beginTransaction();
         try {
@@ -78,6 +90,7 @@ class VirtualStorageService
                 'name' => $name,
                 'user_id' => $userId,
                 'quota_bytes' => $quotaBytes,
+                'strict_mode' => $strictMode ? 1 : 0,
             ]);
             $this->replaceRepositories($id, $repoIds);
             $this->db->getPdo()->commit();
@@ -88,7 +101,7 @@ class VirtualStorageService
         }
     }
 
-    public function update(int $id, string $name, int $userId, int $quotaBytes, array $repoIds): void
+    public function update(int $id, string $name, int $userId, int $quotaBytes, array $repoIds, bool $strictMode = false): void
     {
         $this->db->getPdo()->beginTransaction();
         try {
@@ -96,6 +109,7 @@ class VirtualStorageService
                 'name' => $name,
                 'user_id' => $userId,
                 'quota_bytes' => $quotaBytes,
+                'strict_mode' => $strictMode ? 1 : 0,
             ], 'id = ?', [$id]);
             $this->replaceRepositories($id, $repoIds);
             $this->db->getPdo()->commit();
@@ -108,6 +122,56 @@ class VirtualStorageService
     public function delete(int $id): void
     {
         $this->db->delete('virtual_storages', 'id = ?', [$id]);
+    }
+
+    public function getStrictQuotaBlockForRepository(int $repoId): ?array
+    {
+        $repo = $this->db->fetchOne("
+            SELECT id, agent_id, name
+            FROM repositories
+            WHERE id = ?
+        ", [$repoId]);
+
+        if (!$repo) {
+            return null;
+        }
+
+        $allocations = $this->db->fetchAll("
+            SELECT vs.id, vs.name, vs.quota_bytes, vs.strict_mode, u.username,
+                   COALESCE(SUM(r.size_bytes), 0) AS used_bytes
+            FROM virtual_storage_repositories target
+            JOIN virtual_storages vs ON vs.id = target.virtual_storage_id
+            JOIN users u ON u.id = vs.user_id
+            JOIN virtual_storage_repositories vsr ON vsr.virtual_storage_id = vs.id
+            JOIN repositories r ON r.id = vsr.repository_id
+            WHERE target.repository_id = ?
+              AND vs.strict_mode = 1
+            GROUP BY vs.id, vs.name, vs.quota_bytes, vs.strict_mode, u.username
+            HAVING COALESCE(SUM(r.size_bytes), 0) > vs.quota_bytes
+            ORDER BY COALESCE(SUM(r.size_bytes), 0) - vs.quota_bytes DESC
+            LIMIT 1
+        ", [$repoId]);
+
+        if (empty($allocations)) {
+            return null;
+        }
+
+        $allocation = $allocations[0];
+        $used = (int) $allocation['used_bytes'];
+        $quota = (int) $allocation['quota_bytes'];
+
+        return [
+            'repository_id' => (int) $repo['id'],
+            'repository_name' => $repo['name'],
+            'agent_id' => (int) $repo['agent_id'],
+            'virtual_storage_id' => (int) $allocation['id'],
+            'virtual_storage_name' => $allocation['name'],
+            'strict_mode' => (int) $allocation['strict_mode'],
+            'username' => $allocation['username'],
+            'used_bytes' => $used,
+            'quota_bytes' => $quota,
+            'overage_bytes' => max(0, $used - $quota),
+        ];
     }
 
     private function replaceRepositories(int $virtualStorageId, array $repoIds): void
@@ -147,6 +211,10 @@ class VirtualStorageService
             }
 
             $quota = (int) $vs['quota_bytes'];
+            $vs['id'] = (int) $vs['id'];
+            $vs['user_id'] = (int) $vs['user_id'];
+            $vs['quota_bytes'] = $quota;
+            $vs['strict_mode'] = !empty($vs['strict_mode']);
             $vs['repositories'] = $repos;
             $vs['repository_ids'] = $repoIds;
             $vs['used_bytes'] = $used;
