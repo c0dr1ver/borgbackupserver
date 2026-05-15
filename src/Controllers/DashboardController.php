@@ -111,14 +111,14 @@ class DashboardController extends Controller
         }
 
         // --- Global totals (for the summary tile) ---
-        [$agentWhere, $agentParams] = $this->getAgentWhereClause('a');
+        [$repoWhere, $repoParams] = $this->getRepositoryWhereClause('r', 'a');
         $archiveCountRow = $this->db->fetchOne("
             SELECT COUNT(*) AS c
             FROM archives ar
             JOIN repositories r ON r.id = ar.repository_id
             JOIN agents a ON a.id = r.agent_id
-            WHERE {$agentWhere}
-        ", $agentParams);
+            WHERE {$repoWhere}
+        ", $repoParams);
         // Two separate sums — a JOIN between repos and archives would inflate
         // size_bytes (repos.size_bytes counted once per joined archive row).
         $origRow = $this->db->fetchOne("
@@ -126,21 +126,22 @@ class DashboardController extends Controller
             FROM archives ar
             JOIN repositories r ON r.id = ar.repository_id
             JOIN agents a ON a.id = r.agent_id
-            WHERE {$agentWhere}
-        ", $agentParams);
+            WHERE {$repoWhere}
+        ", $repoParams);
         $diskRow = $this->db->fetchOne("
             SELECT COALESCE(SUM(r.size_bytes), 0) AS on_disk
             FROM repositories r
             JOIN agents a ON a.id = r.agent_id
-            WHERE {$agentWhere}
-        ", $agentParams);
+            WHERE {$repoWhere}
+        ", $repoParams);
         $lastBackup = $this->db->fetchOne("
             SELECT bj.completed_at, a.name AS agent_name
             FROM backup_jobs bj
             JOIN agents a ON a.id = bj.agent_id
-            WHERE bj.task_type = 'backup' AND bj.status = 'completed' AND {$agentWhere}
+            LEFT JOIN repositories r ON r.id = bj.repository_id
+            WHERE bj.task_type = 'backup' AND bj.status = 'completed' AND {$repoWhere}
             ORDER BY bj.completed_at DESC LIMIT 1
-        ", $agentParams);
+        ", $repoParams);
 
         // --- Server identity ---
         $bbsVersion = (new \BBS\Services\UpdateService())->getCurrentVersion();
@@ -247,7 +248,8 @@ class DashboardController extends Controller
         $this->requireAuth();
 
         [$agentWhere, $agentParams] = $this->getAgentWhereClause('a');
-        $jobScope = $agentWhere === '1=1' ? '' : "AND {$agentWhere}";
+        [$jobWhere, $jobParams] = $this->getJobWhereClause('bj', 'a');
+        $jobScope = $jobWhere === '1=1' ? '' : "AND {$jobWhere}";
 
         $agentCount = (int) ($this->db->fetchOne(
             "SELECT COUNT(*) as cnt FROM agents a WHERE {$agentWhere}",
@@ -267,7 +269,7 @@ class DashboardController extends Controller
             LEFT JOIN repositories r ON r.id = bj.repository_id
             WHERE bj.status IN ('queued', 'running', 'sent') {$jobScope}
             ORDER BY bj.queued_at ASC
-        ", $agentParams);
+        ", $jobParams);
 
         $runningJobs = 0;
         $queuedJobs = 0;
@@ -278,11 +280,17 @@ class DashboardController extends Controller
 
         // Tile links to /log?level=error&hours=24, so count only what that
         // page renders. See getDashboardData() for the rationale (#235).
-        $errorCountQuery = "SELECT COUNT(*) as cnt FROM server_log sl LEFT JOIN agents a ON a.id = sl.agent_id WHERE sl.level = 'error' AND sl.created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)";
-        if ($agentWhere !== '1=1') {
-            $errorCountQuery .= " AND ({$agentWhere} OR sl.agent_id IS NULL)";
-        }
-        $errorCount = (int) ($this->db->fetchOne($errorCountQuery, $agentParams)['cnt'] ?? 0);
+        [$logWhere, $logParams] = $this->getLogWhereClause('sl', 'a', 'bjlog');
+        $errorCountQuery = "
+            SELECT COUNT(*) as cnt
+            FROM server_log sl
+            LEFT JOIN agents a ON a.id = sl.agent_id
+            LEFT JOIN backup_jobs bjlog ON bjlog.id = sl.backup_job_id
+            WHERE sl.level = 'error'
+              AND sl.created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
+              AND {$logWhere}
+        ";
+        $errorCount = (int) ($this->db->fetchOne($errorCountQuery, $logParams)['cnt'] ?? 0);
 
         $this->json([
             'agentCount'  => $agentCount,
@@ -314,9 +322,9 @@ class DashboardController extends Controller
         $this->requireAuth();
         $since = $_GET['since'] ?? date('Y-m-d H:i:s', strtotime('-10 seconds'));
 
-        [$agentWhere, $agentParams] = $this->getAgentWhereClause('a');
-        $jobScope = $agentWhere === '1=1' ? '' : "AND {$agentWhere}";
-        $jobParams = array_merge([$since, $since], $agentParams);
+        [$jobWhere, $scopedJobParams] = $this->getJobWhereClause('bj', 'a');
+        $jobScope = $jobWhere === '1=1' ? '' : "AND {$jobWhere}";
+        $jobParams = array_merge([$since, $since], $scopedJobParams);
 
         $jobs = $this->db->fetchAll("
             SELECT bj.id, bj.status, bj.task_type, a.name as agent_name
@@ -330,17 +338,16 @@ class DashboardController extends Controller
             ORDER BY bj.id DESC LIMIT 10
         ", $jobParams);
 
+        [$logWhere, $scopedLogParams] = $this->getLogWhereClause('sl', 'a', 'bjlog');
         $errQuery = "
             SELECT sl.message, a.name as agent_name
             FROM server_log sl
             LEFT JOIN agents a ON a.id = sl.agent_id
+            LEFT JOIN backup_jobs bjlog ON bjlog.id = sl.backup_job_id
             WHERE sl.level = 'error' AND sl.created_at > ?
         ";
-        $errParams = [$since];
-        if ($agentWhere !== '1=1') {
-            $errQuery .= " AND ({$agentWhere} OR sl.agent_id IS NULL)";
-            $errParams = array_merge($errParams, $agentParams);
-        }
+        $errQuery .= " AND {$logWhere}";
+        $errParams = array_merge([$since], $scopedLogParams);
         $errQuery .= " ORDER BY sl.id DESC LIMIT 5";
         $errors = $this->db->fetchAll($errQuery, $errParams);
 
@@ -393,9 +400,10 @@ class DashboardController extends Controller
             "SELECT COUNT(*) as cnt FROM agents a WHERE {$agentWhere} AND a.status = 'online'", $agentParams
         )['cnt'];
 
-        // Job/log queries need agent join for scoping - reuse the same where clause
-        $jobScope = $agentWhere === '1=1' ? '' : "AND {$agentWhere}";
-        $jobParams = $agentParams;
+        // Job/log queries include direct agent access and repositories owned
+        // through Virtual Storage.
+        [$jobWhere, $jobParams] = $this->getJobWhereClause('bj', 'a');
+        $jobScope = $jobWhere === '1=1' ? '' : "AND {$jobWhere}";
 
         $runningJobs = $this->db->fetchOne(
             "SELECT COUNT(*) as cnt FROM backup_jobs bj JOIN agents a ON a.id = bj.agent_id WHERE bj.status IN ('running', 'sent') {$jobScope}", $jobParams
@@ -410,11 +418,17 @@ class DashboardController extends Controller
         // endpoint and the scheduler's stale/zombie sweepers, so they're
         // captured here without a separate count. Operational alerts
         // (agent_offline, missed_schedule) live in /notifications.
-        $errorCountQuery = "SELECT COUNT(*) as cnt FROM server_log sl LEFT JOIN agents a ON a.id = sl.agent_id WHERE sl.level = 'error' AND sl.created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)";
-        if ($agentWhere !== '1=1') {
-            $errorCountQuery .= " AND ({$agentWhere} OR sl.agent_id IS NULL)";
-        }
-        $errorCount = (int) $this->db->fetchOne($errorCountQuery, $jobParams)['cnt'];
+        [$logWhere, $logParams] = $this->getLogWhereClause('sl', 'a', 'bjlog');
+        $errorCountQuery = "
+            SELECT COUNT(*) as cnt
+            FROM server_log sl
+            LEFT JOIN agents a ON a.id = sl.agent_id
+            LEFT JOIN backup_jobs bjlog ON bjlog.id = sl.backup_job_id
+            WHERE sl.level = 'error'
+              AND sl.created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
+              AND {$logWhere}
+        ";
+        $errorCount = (int) $this->db->fetchOne($errorCountQuery, $logParams)['cnt'];
 
         // Optional task-type filter for the Recently Completed list. Accepts
         // a comma-separated list of category keys (backup, restore, prune,
@@ -461,6 +475,8 @@ class DashboardController extends Controller
             ORDER BY bj.queued_at ASC
         ", $jobParams);
 
+        [$planWhere, $planParams] = $this->getPlanWhereClause('bp', 'a');
+        $planScope = $planWhere === '1=1' ? '' : "AND {$planWhere}";
         $upcomingSchedules = $this->db->fetchAll("
             SELECT s.next_run, s.frequency, s.timezone,
                    bp.id as plan_id, bp.name as plan_name, a.name as agent_name, a.id as agent_id
@@ -470,10 +486,10 @@ class DashboardController extends Controller
             WHERE s.enabled = 1
               AND s.next_run IS NOT NULL
               AND bp.enabled = 1
-              {$jobScope}
+              {$planScope}
             ORDER BY s.next_run ASC
             LIMIT 5
-        ", $jobParams);
+        ", $planParams);
 
         // Jobs completed per hour over last 24h, segmented by category
         $jobsChart = $this->db->fetchAll("
@@ -493,16 +509,16 @@ class DashboardController extends Controller
         // tile and the linked /log page (#240) — counting failed_jobs and
         // unresolved alerts here meant the chart showed red bars at hours that
         // had no corresponding entries on the Log page.
+        [$chartLogWhere, $chartLogParams] = $this->getLogWhereClause('sl', 'a', 'bjlog');
         $logErrorsChartQuery = "SELECT DATE_FORMAT(sl.created_at, '%Y-%m-%d %H:00') as hour, COUNT(*) as count
                                   FROM server_log sl
                                   LEFT JOIN agents a ON a.id = sl.agent_id
+                                  LEFT JOIN backup_jobs bjlog ON bjlog.id = sl.backup_job_id
                                  WHERE sl.level = 'error'
-                                   AND sl.created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)";
-        if ($agentWhere !== '1=1') {
-            $logErrorsChartQuery .= " AND ({$agentWhere} OR sl.agent_id IS NULL)";
-        }
-        $logErrorsChartQuery .= " GROUP BY hour ORDER BY hour";
-        $logErrorsChart = $this->db->fetchAll($logErrorsChartQuery, $jobParams);
+                                   AND sl.created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                                   AND {$chartLogWhere}
+                              GROUP BY hour ORDER BY hour";
+        $logErrorsChart = $this->db->fetchAll($logErrorsChartQuery, $chartLogParams);
 
         // Group task types into 3 categories
         $categoryMap = [

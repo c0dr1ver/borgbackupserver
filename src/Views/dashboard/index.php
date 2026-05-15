@@ -263,34 +263,52 @@ $dfFix = function (string $s): string {
     <?php if (!$isAdmin && !empty($userVirtualStorages)): ?>
     <div class="card border-0 shadow-sm mb-3">
         <div class="card-header card-head-gradient fw-semibold">
-            <i class="bi bi-pie-chart me-2"></i>My Storage
+            <i class="bi bi-pie-chart me-2"></i>Virtual Storage
         </div>
         <div class="card-body">
-            <div class="storage-grid <?= count($userVirtualStorages) <= 6 ? 'exact-cols' : '' ?> <?= count($userVirtualStorages) === 1 ? 'single-col' : '' ?>" style="--storage-cols: <?= min(count($userVirtualStorages), 6) ?>">
+            <div class="row g-3">
                 <?php foreach ($userVirtualStorages as $vs): ?>
                 <?php
                     $quota = (int) $vs['quota_bytes'];
                     $used = (int) $vs['used_bytes'];
                     $free = (int) $vs['free_bytes'];
                     $pct = (float) $vs['usage_percent'];
-                    $fillColor = $pct >= 95 ? '#dc3545' : ($pct >= 80 ? '#ffc107' : '#198754');
+                    $barColor = $pct >= 95 ? 'danger' : ($pct >= 80 ? 'warning' : 'success');
                 ?>
-                <div class="storage-card">
-                    <div class="sc-head">
-                        <div>
-                            <div class="sc-label"><?= htmlspecialchars($vs['name']) ?></div>
-                            <div class="sc-kind">Virtual Storage</div>
+                <div class="col-xl-4 col-lg-6">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <div>
+                                    <h6 class="mb-1"><?= htmlspecialchars($vs['name']) ?></h6>
+                                    <div class="small text-muted">Virtual Storage</div>
+                                </div>
+                                <span class="fw-bold text-<?= $barColor ?>"><?= $pct ?>%</span>
+                            </div>
+                            <div class="d-flex justify-content-between small text-muted mb-1">
+                                <span><?= ServerStats::formatBytes($used) ?> used</span>
+                                <span><?= ServerStats::formatBytes($free) ?> free</span>
+                            </div>
+                            <div class="progress" style="height: 6px;">
+                                <div class="progress-bar bg-<?= $barColor ?>" style="width: <?= $pct ?>%"></div>
+                            </div>
+                            <div class="text-muted small mt-1">
+                                <?= ServerStats::formatBytes($quota) ?> quota &middot; <?= $pct ?>% used
+                            </div>
+                            <div class="mt-2 small text-muted">
+                                <i class="bi bi-archive me-1"></i><?= count($vs['repositories']) ?> repo<?= count($vs['repositories']) === 1 ? '' : 's' ?>
+                            </div>
+                            <?php if (!empty($vs['repositories'])): ?>
+                            <div class="mt-2 d-flex flex-wrap gap-1">
+                                <?php foreach (array_slice($vs['repositories'], 0, 4) as $repo): ?>
+                                <span class="badge text-bg-secondary"><?= htmlspecialchars($repo['agent_name']) ?> / <?= htmlspecialchars($repo['name']) ?></span>
+                                <?php endforeach; ?>
+                                <?php if (count($vs['repositories']) > 4): ?>
+                                <span class="badge text-bg-secondary">+<?= count($vs['repositories']) - 4 ?> more</span>
+                                <?php endif; ?>
+                            </div>
+                            <?php endif; ?>
                         </div>
-                        <span class="fw-bold" style="color: <?= $fillColor ?>;"><?= $pct ?>%</span>
-                    </div>
-                    <div class="sc-bar"><div class="sc-fill" style="width: <?= $pct ?>%; background: <?= $fillColor ?>;"></div></div>
-                    <div class="sc-numbers">
-                        <span><?= ServerStats::formatBytes($used) ?> used</span>
-                        <span><?= ServerStats::formatBytes($free) ?> free</span>
-                    </div>
-                    <div class="sc-footer">
-                        <span><i class="bi bi-archive me-1"></i><?= count($vs['repositories']) ?> repo<?= count($vs['repositories']) === 1 ? '' : 's' ?></span>
-                        <span><?= ServerStats::formatBytes($quota) ?> quota</span>
                     </div>
                 </div>
                 <?php endforeach; ?>

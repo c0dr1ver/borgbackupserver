@@ -11,7 +11,7 @@ class QueueController extends Controller
     {
         $this->requireAuth();
 
-        [$agentWhere, $agentParams] = $this->getAgentWhereClause('a');
+        [$jobWhere, $jobParams] = $this->getJobWhereClause('bj', 'a');
 
         $inProgress = $this->db->fetchAll("
             SELECT bj.*, SUBSTRING(bj.error_log, 1, 255) as error_log, a.name as agent_name, r.name as repo_name
@@ -19,9 +19,9 @@ class QueueController extends Controller
             JOIN agents a ON a.id = bj.agent_id
             LEFT JOIN repositories r ON r.id = bj.repository_id
             WHERE bj.status IN ('queued', 'sent', 'running')
-            AND {$agentWhere}
+            AND {$jobWhere}
             ORDER BY bj.queued_at ASC
-        ", $agentParams);
+        ", $jobParams);
 
         $completed = $this->db->fetchAll("
             SELECT bj.*, SUBSTRING(bj.error_log, 1, 255) as error_log, a.name as agent_name, r.name as repo_name
@@ -29,12 +29,12 @@ class QueueController extends Controller
             JOIN agents a ON a.id = bj.agent_id
             LEFT JOIN repositories r ON r.id = bj.repository_id
             WHERE bj.status IN ('completed', 'failed')
-            AND {$agentWhere}
+            AND {$jobWhere}
             ORDER BY bj.completed_at DESC
             LIMIT 25
-        ", $agentParams);
+        ", $jobParams);
 
-        $stats = $this->collectQueueStats($agentWhere, $agentParams);
+        $stats = $this->collectQueueStats($jobWhere, $jobParams);
 
         $this->view('queue/index', [
             'pageTitle' => 'Queue',
@@ -43,38 +43,38 @@ class QueueController extends Controller
         ] + $stats);
     }
 
-    private function collectQueueStats(string $agentWhere, array $agentParams): array
+    private function collectQueueStats(string $jobWhere, array $jobParams): array
     {
         $queuedCount = (int) ($this->db->fetchOne("
             SELECT COUNT(*) AS cnt FROM backup_jobs bj
             JOIN agents a ON a.id = bj.agent_id
-            WHERE bj.status IN ('queued', 'sent') AND {$agentWhere}
-        ", $agentParams)['cnt'] ?? 0);
+            WHERE bj.status IN ('queued', 'sent') AND {$jobWhere}
+        ", $jobParams)['cnt'] ?? 0);
 
         $runningCount = (int) ($this->db->fetchOne("
             SELECT COUNT(*) AS cnt FROM backup_jobs bj
             JOIN agents a ON a.id = bj.agent_id
-            WHERE bj.status = 'running' AND {$agentWhere}
-        ", $agentParams)['cnt'] ?? 0);
+            WHERE bj.status = 'running' AND {$jobWhere}
+        ", $jobParams)['cnt'] ?? 0);
 
         $completed24h = (int) ($this->db->fetchOne("
             SELECT COUNT(*) AS cnt FROM backup_jobs bj
             JOIN agents a ON a.id = bj.agent_id
-            WHERE bj.status = 'completed' AND bj.completed_at > DATE_SUB(NOW(), INTERVAL 24 HOUR) AND {$agentWhere}
-        ", $agentParams)['cnt'] ?? 0);
+            WHERE bj.status = 'completed' AND bj.completed_at > DATE_SUB(NOW(), INTERVAL 24 HOUR) AND {$jobWhere}
+        ", $jobParams)['cnt'] ?? 0);
 
         $failed24h = (int) ($this->db->fetchOne("
             SELECT COUNT(*) AS cnt FROM backup_jobs bj
             JOIN agents a ON a.id = bj.agent_id
-            WHERE bj.status = 'failed' AND bj.completed_at > DATE_SUB(NOW(), INTERVAL 24 HOUR) AND {$agentWhere}
-        ", $agentParams)['cnt'] ?? 0);
+            WHERE bj.status = 'failed' AND bj.completed_at > DATE_SUB(NOW(), INTERVAL 24 HOUR) AND {$jobWhere}
+        ", $jobParams)['cnt'] ?? 0);
 
         $avgDuration = $this->db->fetchOne("
             SELECT ROUND(AVG(TIMESTAMPDIFF(SECOND, bj.started_at, bj.completed_at))) AS avg_sec
             FROM backup_jobs bj
             JOIN agents a ON a.id = bj.agent_id
-            WHERE bj.status = 'completed' AND bj.completed_at > DATE_SUB(NOW(), INTERVAL 24 HOUR) AND bj.started_at IS NOT NULL AND {$agentWhere}
-        ", $agentParams);
+            WHERE bj.status = 'completed' AND bj.completed_at > DATE_SUB(NOW(), INTERVAL 24 HOUR) AND bj.started_at IS NOT NULL AND {$jobWhere}
+        ", $jobParams);
         $avgSec = (int) ($avgDuration['avg_sec'] ?? 0);
 
         $maxQueue = (int) ($this->db->fetchOne("SELECT `value` FROM settings WHERE `key` = 'max_queue'")['value'] ?? 4);
@@ -93,7 +93,7 @@ class QueueController extends Controller
     {
         $this->requireAuth();
 
-        [$agentWhere, $agentParams] = $this->getAgentWhereClause('a');
+        [$jobWhere, $jobParams] = $this->getJobWhereClause('bj', 'a');
 
         $inProgress = $this->db->fetchAll("
             SELECT bj.*, SUBSTRING(bj.error_log, 1, 255) as error_log, a.name as agent_name, r.name as repo_name
@@ -101,9 +101,9 @@ class QueueController extends Controller
             JOIN agents a ON a.id = bj.agent_id
             LEFT JOIN repositories r ON r.id = bj.repository_id
             WHERE bj.status IN ('queued', 'sent', 'running')
-            AND {$agentWhere}
+            AND {$jobWhere}
             ORDER BY bj.queued_at ASC
-        ", $agentParams);
+        ", $jobParams);
 
         $completed = $this->db->fetchAll("
             SELECT bj.*, SUBSTRING(bj.error_log, 1, 255) as error_log, a.name as agent_name, r.name as repo_name
@@ -111,12 +111,12 @@ class QueueController extends Controller
             JOIN agents a ON a.id = bj.agent_id
             LEFT JOIN repositories r ON r.id = bj.repository_id
             WHERE bj.status IN ('completed', 'failed')
-            AND {$agentWhere}
+            AND {$jobWhere}
             ORDER BY bj.completed_at DESC
             LIMIT 25
-        ", $agentParams);
+        ", $jobParams);
 
-        $stats = $this->collectQueueStats($agentWhere, $agentParams);
+        $stats = $this->collectQueueStats($jobWhere, $jobParams);
 
         $this->json([
             'inProgress' => $inProgress,
@@ -140,7 +140,7 @@ class QueueController extends Controller
             WHERE bj.id = ?
         ", [$id]);
 
-        if (!$job || !$this->canAccessAgent($job['agent_id'])) {
+        if (!$job || !$this->canAccessJob($job)) {
             $this->flash('danger', 'Job not found.');
             $this->redirect('/queue');
         }
@@ -196,7 +196,7 @@ class QueueController extends Controller
             WHERE bj.id = ?
         ", [$id]);
 
-        if (!$job || !$this->canAccessAgent($job['agent_id'])) {
+        if (!$job || !$this->canAccessJob($job)) {
             http_response_code(404);
             header('Content-Type: application/json');
             echo json_encode(['error' => 'Not found']);
@@ -324,7 +324,7 @@ class QueueController extends Controller
         }
 
         // Check access to the agent
-        if (!$this->canAccessAgent($job['agent_id'])) {
+        if (!$this->canAccessJob($job)) {
             $this->flash('danger', 'Job not found.');
             $this->redirect('/queue');
         }
@@ -371,7 +371,7 @@ class QueueController extends Controller
         }
 
         // Check access to the agent
-        if (!$this->canAccessAgent($job['agent_id'])) {
+        if (!$this->canAccessJob($job)) {
             $this->flash('danger', 'Job not found.');
             $this->redirect('/queue');
         }

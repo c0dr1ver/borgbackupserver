@@ -21,11 +21,10 @@ class LogController extends Controller
         $perPage = 50;
         $offset = ($page - 1) * $perPage;
 
-        // Filter logs by accessible agents
-        [$agentWhere, $agentParams] = $this->getAgentWhereClause('a');
-
-        $where = "(sl.agent_id IS NULL OR {$agentWhere})";
-        $params = $agentParams;
+        // Filter logs by accessible agents and by jobs from Virtual Storage
+        // repositories owned by the current user.
+        [$logWhere, $params] = $this->getLogWhereClause('sl', 'a', 'bjlog');
+        $where = $logWhere;
 
         if ($level && in_array($level, ['info', 'warning', 'error'])) {
             $where .= ' AND sl.level = ?';
@@ -53,6 +52,7 @@ class LogController extends Controller
             SELECT COUNT(*) as cnt
             FROM server_log sl
             LEFT JOIN agents a ON a.id = sl.agent_id
+            LEFT JOIN backup_jobs bjlog ON bjlog.id = sl.backup_job_id
             WHERE {$where}
         ", $params);
         $total = (int) ($countRow['cnt'] ?? 0);
@@ -62,6 +62,7 @@ class LogController extends Controller
             SELECT sl.*, a.name as agent_name
             FROM server_log sl
             LEFT JOIN agents a ON a.id = sl.agent_id
+            LEFT JOIN backup_jobs bjlog ON bjlog.id = sl.backup_job_id
             WHERE {$where}
             ORDER BY sl.created_at DESC
             LIMIT {$perPage} OFFSET {$offset}

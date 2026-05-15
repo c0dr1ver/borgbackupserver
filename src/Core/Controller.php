@@ -214,6 +214,116 @@ class Controller
         return $permService->getAgentWhereClause($_SESSION['user_id'], $agentAlias);
     }
 
+    protected function getVirtualStorageRepositoryIdsForUser(?int $userId = null): array
+    {
+        if ($this->isAdmin()) {
+            return [];
+        }
+
+        $userId = $userId ?? (int) ($_SESSION['user_id'] ?? 0);
+        if ($userId <= 0) {
+            return [];
+        }
+
+        $rows = $this->db->fetchAll("
+            SELECT DISTINCT vsr.repository_id
+            FROM virtual_storages vs
+            JOIN virtual_storage_repositories vsr ON vsr.virtual_storage_id = vs.id
+            WHERE vs.user_id = ?
+        ", [$userId]);
+
+        return array_values(array_map('intval', array_column($rows, 'repository_id')));
+    }
+
+    protected function getJobWhereClause(string $jobAlias = 'bj', string $agentAlias = 'a'): array
+    {
+        if ($this->isAdmin()) {
+            return ['1=1', []];
+        }
+
+        [$agentWhere, $params] = $this->getAgentWhereClause($agentAlias);
+        $repoIds = $this->getVirtualStorageRepositoryIdsForUser();
+        if (empty($repoIds)) {
+            return [$agentWhere, $params];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($repoIds), '?'));
+        return [
+            "(({$agentWhere}) OR {$jobAlias}.repository_id IN ({$placeholders}))",
+            array_merge($params, $repoIds),
+        ];
+    }
+
+    protected function getPlanWhereClause(string $planAlias = 'bp', string $agentAlias = 'a'): array
+    {
+        if ($this->isAdmin()) {
+            return ['1=1', []];
+        }
+
+        [$agentWhere, $params] = $this->getAgentWhereClause($agentAlias);
+        $repoIds = $this->getVirtualStorageRepositoryIdsForUser();
+        if (empty($repoIds)) {
+            return [$agentWhere, $params];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($repoIds), '?'));
+        return [
+            "(({$agentWhere}) OR {$planAlias}.repository_id IN ({$placeholders}))",
+            array_merge($params, $repoIds),
+        ];
+    }
+
+    protected function getRepositoryWhereClause(string $repoAlias = 'r', string $agentAlias = 'a'): array
+    {
+        if ($this->isAdmin()) {
+            return ['1=1', []];
+        }
+
+        [$agentWhere, $params] = $this->getAgentWhereClause($agentAlias);
+        $repoIds = $this->getVirtualStorageRepositoryIdsForUser();
+        if (empty($repoIds)) {
+            return [$agentWhere, $params];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($repoIds), '?'));
+        return [
+            "(({$agentWhere}) OR {$repoAlias}.id IN ({$placeholders}))",
+            array_merge($params, $repoIds),
+        ];
+    }
+
+    protected function canAccessJob(array $job): bool
+    {
+        if ($this->isAdmin()) {
+            return true;
+        }
+        if (!empty($job['agent_id']) && $this->canAccessAgent((int) $job['agent_id'])) {
+            return true;
+        }
+        if (!empty($job['repository_id'])) {
+            return in_array((int) $job['repository_id'], $this->getVirtualStorageRepositoryIdsForUser(), true);
+        }
+        return false;
+    }
+
+    protected function getLogWhereClause(string $logAlias = 'sl', string $agentAlias = 'a', string $jobAlias = 'bjlog'): array
+    {
+        if ($this->isAdmin()) {
+            return ['1=1', []];
+        }
+
+        [$agentWhere, $params] = $this->getAgentWhereClause($agentAlias);
+        $repoIds = $this->getVirtualStorageRepositoryIdsForUser();
+        $parts = ["({$agentWhere})", "{$logAlias}.agent_id IS NULL"];
+        if (!empty($repoIds)) {
+            $placeholders = implode(',', array_fill(0, count($repoIds), '?'));
+            $parts[] = "{$jobAlias}.repository_id IN ({$placeholders})";
+            $params = array_merge($params, $repoIds);
+        }
+
+        return ['(' . implode(' OR ', $parts) . ')', $params];
+    }
+
     protected function csrfToken(): string
     {
         if (empty($_SESSION['csrf_token'])) {
