@@ -399,9 +399,6 @@
 </div>
 
 <script>
-// Enable tooltips for error messages
-document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
-
 // AJAX auto-refresh
 (function() {
     const csrfToken = '<?= $this->csrfToken() ?>';
@@ -607,9 +604,6 @@ document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootst
                 }
 
                 refreshMetrics(data);
-
-                // Re-init tooltips
-                document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
             })
             .catch(() => {});
     }

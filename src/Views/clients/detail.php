@@ -1188,7 +1188,6 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
             document.getElementById('passphraseRow').style.display = this.value === 'none' ? 'none' : 'flex';
         });
     }
-    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
     </script>
 
 <?php elseif ($tab === 'schedules'): ?>
@@ -2288,9 +2287,6 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
             document.getElementById('create-plan-section').style.display = 'none';
         });
     });
-
-    // Tooltips for help links in schedules tab
-    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
 
     // Deep-link: ?edit_plan=<id> auto-expands the edit panel for that plan and
     // scrolls it into view. Used by the Schedules calendar's "Edit Plan" menu.
