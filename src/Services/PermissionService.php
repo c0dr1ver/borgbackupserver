@@ -46,13 +46,9 @@ class PermissionService
             return true;
         }
 
-        // Check all_clients flag
-        $user = $this->db->fetchOne("SELECT all_clients FROM users WHERE id = ?", [$userId]);
-        if ($user && $user['all_clients']) {
-            return true;
-        }
-
-        // Check junction table
+        // Client ownership is represented by user_agents. The older
+        // users.all_clients flag is intentionally not used for authorization:
+        // non-admin users should only see explicitly assigned clients.
         $assignment = $this->db->fetchOne(
             "SELECT id FROM user_agents WHERE user_id = ? AND agent_id = ?",
             [$userId, $agentId]
@@ -104,12 +100,6 @@ class PermissionService
             return array_column($rows, 'id');
         }
 
-        $user = $this->db->fetchOne("SELECT all_clients FROM users WHERE id = ?", [$userId]);
-        if ($user && $user['all_clients']) {
-            $rows = $this->db->fetchAll("SELECT id FROM agents");
-            return array_column($rows, 'id');
-        }
-
         $rows = $this->db->fetchAll(
             "SELECT agent_id FROM user_agents WHERE user_id = ?",
             [$userId]
@@ -124,11 +114,6 @@ class PermissionService
     public function getAgentWhereClause(int $userId, string $agentAlias = 'a'): array
     {
         if ($this->isAdmin($userId)) {
-            return ['1=1', []];
-        }
-
-        $user = $this->db->fetchOne("SELECT all_clients FROM users WHERE id = ?", [$userId]);
-        if ($user && $user['all_clients']) {
             return ['1=1', []];
         }
 
@@ -154,6 +139,44 @@ class PermissionService
                     'agent_id' => (int) $agentId,
                 ]);
             }
+        }
+    }
+
+    /**
+     * Synchronize the single owner of a client with the permission tables.
+     *
+     * agents.user_id is the admin-facing owner field. user_agents and
+     * user_permissions are the authorization cache used by controllers.
+     */
+    public function syncAgentOwner(int $agentId, ?int $userId): void
+    {
+        $this->db->delete('user_agents', 'agent_id = ?', [$agentId]);
+        $this->db->delete('user_permissions', 'agent_id = ?', [$agentId]);
+
+        if ($userId === null) {
+            return;
+        }
+
+        $this->db->insert('user_agents', [
+            'user_id' => $userId,
+            'agent_id' => $agentId,
+        ]);
+
+        foreach (self::ALL_PERMISSIONS as $permission) {
+            $this->db->insert('user_permissions', [
+                'user_id' => $userId,
+                'permission' => $permission,
+                'agent_id' => $agentId,
+            ]);
+        }
+    }
+
+    public function syncAllAgentOwners(): void
+    {
+        $agents = $this->db->fetchAll("SELECT id, user_id FROM agents");
+        foreach ($agents as $agent) {
+            $ownerId = !empty($agent['user_id']) ? (int) $agent['user_id'] : null;
+            $this->syncAgentOwner((int) $agent['id'], $ownerId);
         }
     }
 
@@ -228,20 +251,19 @@ class PermissionService
     }
 
     /**
-     * Set all_clients flag for user.
+     * Legacy compatibility: all_clients is no longer honored for access.
      */
     public function setAllClients(int $userId, bool $allClients): void
     {
-        $this->db->update('users', ['all_clients' => $allClients ? 1 : 0], 'id = ?', [$userId]);
+        $this->db->update('users', ['all_clients' => 0], 'id = ?', [$userId]);
     }
 
     /**
-     * Check if user has all_clients flag.
+     * Legacy compatibility: non-admin users never receive implicit all-client access.
      */
     public function hasAllClients(int $userId): bool
     {
-        $user = $this->db->fetchOne("SELECT all_clients FROM users WHERE id = ?", [$userId]);
-        return $user && (bool) $user['all_clients'];
+        return false;
     }
 
     private function isAdmin(int $userId): bool

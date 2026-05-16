@@ -21,8 +21,7 @@ class LogController extends Controller
         $perPage = 50;
         $offset = ($page - 1) * $perPage;
 
-        // Filter logs by accessible agents and by jobs from Virtual Storage
-        // repositories owned by the current user.
+        // Filter logs by explicitly accessible clients.
         [$logWhere, $params] = $this->getLogWhereClause('sl', 'a', 'bjlog');
         $where = $logWhere;
 

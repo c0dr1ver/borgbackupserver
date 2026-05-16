@@ -400,8 +400,7 @@ class DashboardController extends Controller
             "SELECT COUNT(*) as cnt FROM agents a WHERE {$agentWhere} AND a.status = 'online'", $agentParams
         )['cnt'];
 
-        // Job/log queries include direct agent access and repositories owned
-        // through Virtual Storage.
+        // Job/log queries are scoped by explicitly owned clients only.
         [$jobWhere, $jobParams] = $this->getJobWhereClause('bj', 'a');
         $jobScope = $jobWhere === '1=1' ? '' : "AND {$jobWhere}";
 

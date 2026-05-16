@@ -7,6 +7,7 @@ use BBS\Services\SshKeyManager;
 use BBS\Services\Encryption;
 use BBS\Services\PermissionService;
 use BBS\Services\S3SyncService;
+use BBS\Services\VirtualStorageService;
 
 class ClientController extends Controller
 {
@@ -199,7 +200,7 @@ class ClientController extends Controller
     {
         $this->requireAdmin();
 
-        $users = $this->db->fetchAll("SELECT id, username FROM users ORDER BY username");
+        $users = $this->db->fetchAll("SELECT id, username FROM users WHERE role != 'admin' ORDER BY username");
 
         $this->view('clients/add', [
             'pageTitle' => 'Clients',
@@ -219,7 +220,7 @@ class ClientController extends Controller
         }
 
         $apiKey = bin2hex(random_bytes(32));
-        $userId = !empty($_POST['user_id']) ? (int) $_POST['user_id'] : null;
+        $userId = $this->readOwnerUserId('/clients/add');
 
         $id = $this->db->insert('agents', [
             'name' => $name,
@@ -228,6 +229,7 @@ class ClientController extends Controller
             'status' => 'setup',
             'user_id' => $userId,
         ]);
+        (new PermissionService())->syncAgentOwner($id, $userId);
 
         // Determine SSH home path: use storage_path unless a separate storage location
         // is configured for repos. SSH home dirs MUST be on a local filesystem (chown
@@ -359,7 +361,7 @@ class ClientController extends Controller
         ", [$id]);
 
         // Users list for owner assignment
-        $users = $this->isAdmin() ? $this->db->fetchAll("SELECT id, username FROM users ORDER BY username") : [];
+        $users = $this->isAdmin() ? $this->db->fetchAll("SELECT id, username FROM users WHERE role != 'admin' ORDER BY username") : [];
 
         // Status tab data
         $nextBackup = $this->db->fetchOne("
@@ -1609,8 +1611,24 @@ class ClientController extends Controller
         if (isset($_POST['name']) && trim($_POST['name']) !== '') {
             $data['name'] = trim($_POST['name']);
         }
+        $ownerChanged = false;
+        $newOwnerId = !empty($agent['user_id']) ? (int) $agent['user_id'] : null;
         if ($this->isAdmin() && array_key_exists('user_id', $_POST)) {
-            $data['user_id'] = $_POST['user_id'] !== '' ? (int) $_POST['user_id'] : null;
+            $newOwnerId = $this->readOwnerUserId("/clients/{$id}");
+            $oldOwnerId = !empty($agent['user_id']) ? (int) $agent['user_id'] : null;
+            $ownerChanged = $newOwnerId !== $oldOwnerId;
+            if ($ownerChanged) {
+                $conflicts = (new VirtualStorageService())->getOwnerConflictsForAgent($id, $newOwnerId);
+                if (!empty($conflicts)) {
+                    $names = array_map(
+                        fn($vs) => "\"{$vs['name']}\" owned by {$vs['username']}",
+                        $conflicts
+                    );
+                    $this->flash('danger', 'Cannot change owner. This client has repositories assigned to Virtual Storage ' . implode(', ', $names) . '. Remove or move those repositories first.');
+                    $this->redirect("/clients/{$id}");
+                }
+            }
+            $data['user_id'] = $newOwnerId;
         }
         if ($this->isAdmin() && array_key_exists('server_host_override', $_POST)) {
             $host = trim($_POST['server_host_override']);
@@ -1622,11 +1640,37 @@ class ClientController extends Controller
         }
 
         if (!empty($data)) {
-            $this->db->update('agents', $data, 'id = ?', [$id]);
-            $this->flash('success', 'Client updated.');
+            $this->db->getPdo()->beginTransaction();
+            try {
+                $this->db->update('agents', $data, 'id = ?', [$id]);
+                if ($ownerChanged) {
+                    (new PermissionService())->syncAgentOwner($id, $newOwnerId);
+                }
+                $this->db->getPdo()->commit();
+                $this->flash('success', 'Client updated.');
+            } catch (\Throwable $e) {
+                $this->db->getPdo()->rollBack();
+                $this->flash('danger', 'Client update failed: ' . $e->getMessage());
+            }
         }
 
         $this->redirect("/clients/{$id}");
+    }
+
+    private function readOwnerUserId(string $redirectUrl): ?int
+    {
+        if (($_POST['user_id'] ?? '') === '') {
+            return null;
+        }
+
+        $userId = (int) $_POST['user_id'];
+        $user = $this->db->fetchOne("SELECT id FROM users WHERE id = ? AND role != 'admin'", [$userId]);
+        if (!$user) {
+            $this->flash('danger', 'Owner must be a non-admin user.');
+            $this->redirect($redirectUrl);
+        }
+
+        return $userId;
     }
 
     public function delete(int $id): void

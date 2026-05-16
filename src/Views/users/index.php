@@ -71,8 +71,6 @@
                 <div class="text-muted small mb-2">
                     <?php if ($user['role'] === 'admin'): ?>
                     All access
-                    <?php elseif ($user['all_clients']): ?>
-                    <span class="text-info">All clients</span>
                     <?php elseif ($user['agent_count'] > 0): ?>
                     <?= $user['agent_count'] ?> client<?= $user['agent_count'] != 1 ? 's' : '' ?>
                     <?php else: ?>

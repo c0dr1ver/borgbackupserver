@@ -220,36 +220,13 @@ class OidcService
     }
 
     /**
-     * Copy agent assignments and permissions from a template user to a new user.
+     * Template users no longer copy client ownership. Client access is a
+     * single-owner relationship (agents.user_id -> user_agents), so duplicating
+     * another user's assignments would create an authorization conflict.
      */
     private function copyPermissionsFromTemplate(int $newUserId, int $templateUserId): void
     {
-        $template = $this->db->fetchOne("SELECT all_clients FROM users WHERE id = ?", [$templateUserId]);
-        if (!$template) return;
-
-        // Copy all_clients flag
-        if ($template['all_clients']) {
-            $this->db->update('users', ['all_clients' => 1], 'id = ?', [$newUserId]);
-        }
-
-        // Copy agent assignments
-        $agents = $this->db->fetchAll("SELECT agent_id FROM user_agents WHERE user_id = ?", [$templateUserId]);
-        foreach ($agents as $a) {
-            $this->db->insert('user_agents', [
-                'user_id' => $newUserId,
-                'agent_id' => $a['agent_id'],
-            ]);
-        }
-
-        // Copy permissions
-        $perms = $this->db->fetchAll("SELECT permission, agent_id FROM user_permissions WHERE user_id = ?", [$templateUserId]);
-        foreach ($perms as $p) {
-            $this->db->insert('user_permissions', [
-                'user_id' => $newUserId,
-                'permission' => $p['permission'],
-                'agent_id' => $p['agent_id'],
-            ]);
-        }
+        $this->db->update('users', ['all_clients' => 0], 'id = ?', [$newUserId]);
     }
 
     /**

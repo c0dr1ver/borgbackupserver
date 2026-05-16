@@ -865,7 +865,11 @@ class AdminApiController extends Controller
         }
 
         $service = $this->virtualStorageService();
-        $id = $service->create($name, $userId, $quotaBytes, $repoIds, $strictMode);
+        try {
+            $id = $service->create($name, $userId, $quotaBytes, $repoIds, $strictMode);
+        } catch (\InvalidArgumentException $e) {
+            $this->json(['error' => $e->getMessage()], 400);
+        }
 
         $this->db->insert('server_log', [
             'level' => 'info',
@@ -906,7 +910,11 @@ class AdminApiController extends Controller
             ? $this->boolFromInput($input['strict_mode'])
             : !empty($existing['strict_mode']);
 
-        $service->update($id, $name, $userId, $quotaBytes, $repoIds, $strictMode);
+        try {
+            $service->update($id, $name, $userId, $quotaBytes, $repoIds, $strictMode);
+        } catch (\InvalidArgumentException $e) {
+            $this->json(['error' => $e->getMessage()], 400);
+        }
 
         $this->db->insert('server_log', [
             'level' => 'info',

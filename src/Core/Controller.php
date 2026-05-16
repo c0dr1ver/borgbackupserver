@@ -241,17 +241,7 @@ class Controller
             return ['1=1', []];
         }
 
-        [$agentWhere, $params] = $this->getAgentWhereClause($agentAlias);
-        $repoIds = $this->getVirtualStorageRepositoryIdsForUser();
-        if (empty($repoIds)) {
-            return [$agentWhere, $params];
-        }
-
-        $placeholders = implode(',', array_fill(0, count($repoIds), '?'));
-        return [
-            "(({$agentWhere}) OR {$jobAlias}.repository_id IN ({$placeholders}))",
-            array_merge($params, $repoIds),
-        ];
+        return $this->getAgentWhereClause($agentAlias);
     }
 
     protected function getPlanWhereClause(string $planAlias = 'bp', string $agentAlias = 'a'): array
@@ -260,17 +250,7 @@ class Controller
             return ['1=1', []];
         }
 
-        [$agentWhere, $params] = $this->getAgentWhereClause($agentAlias);
-        $repoIds = $this->getVirtualStorageRepositoryIdsForUser();
-        if (empty($repoIds)) {
-            return [$agentWhere, $params];
-        }
-
-        $placeholders = implode(',', array_fill(0, count($repoIds), '?'));
-        return [
-            "(({$agentWhere}) OR {$planAlias}.repository_id IN ({$placeholders}))",
-            array_merge($params, $repoIds),
-        ];
+        return $this->getAgentWhereClause($agentAlias);
     }
 
     protected function getRepositoryWhereClause(string $repoAlias = 'r', string $agentAlias = 'a'): array
@@ -279,17 +259,7 @@ class Controller
             return ['1=1', []];
         }
 
-        [$agentWhere, $params] = $this->getAgentWhereClause($agentAlias);
-        $repoIds = $this->getVirtualStorageRepositoryIdsForUser();
-        if (empty($repoIds)) {
-            return [$agentWhere, $params];
-        }
-
-        $placeholders = implode(',', array_fill(0, count($repoIds), '?'));
-        return [
-            "(({$agentWhere}) OR {$repoAlias}.id IN ({$placeholders}))",
-            array_merge($params, $repoIds),
-        ];
+        return $this->getAgentWhereClause($agentAlias);
     }
 
     protected function canAccessJob(array $job): bool
@@ -299,9 +269,6 @@ class Controller
         }
         if (!empty($job['agent_id']) && $this->canAccessAgent((int) $job['agent_id'])) {
             return true;
-        }
-        if (!empty($job['repository_id'])) {
-            return in_array((int) $job['repository_id'], $this->getVirtualStorageRepositoryIdsForUser(), true);
         }
         return false;
     }
@@ -313,13 +280,7 @@ class Controller
         }
 
         [$agentWhere, $params] = $this->getAgentWhereClause($agentAlias);
-        $repoIds = $this->getVirtualStorageRepositoryIdsForUser();
         $parts = ["({$agentWhere})", "{$logAlias}.agent_id IS NULL"];
-        if (!empty($repoIds)) {
-            $placeholders = implode(',', array_fill(0, count($repoIds), '?'));
-            $parts[] = "{$jobAlias}.repository_id IN ({$placeholders})";
-            $params = array_merge($params, $repoIds);
-        }
 
         return ['(' . implode(' OR ', $parts) . ')', $params];
     }

@@ -28,15 +28,25 @@ class VirtualStorageService
         return (int) round($gb * 1024 * 1024 * 1024);
     }
 
-    public function getAssignableRepositories(): array
+    public function getAssignableRepositories(?int $userId = null): array
     {
+        $where = '';
+        $params = [];
+        if ($userId !== null) {
+            $where = 'WHERE a.user_id = ?';
+            $params[] = $userId;
+        }
+
         return $this->db->fetchAll("
             SELECT r.id, r.name, r.size_bytes, r.storage_type,
-                   a.id AS agent_id, a.name AS agent_name
+                   a.id AS agent_id, a.name AS agent_name,
+                   a.user_id AS owner_user_id, u.username AS owner_username
             FROM repositories r
             JOIN agents a ON a.id = r.agent_id
-            ORDER BY a.name, r.name
-        ");
+            LEFT JOIN users u ON u.id = a.user_id
+            {$where}
+            ORDER BY u.username, a.name, r.name
+        ", $params);
     }
 
     public function listUsers(): array
@@ -86,6 +96,7 @@ class VirtualStorageService
     {
         $this->db->getPdo()->beginTransaction();
         try {
+            $repoIds = $this->validateRepositoryOwnership($userId, $repoIds);
             $id = $this->db->insert('virtual_storages', [
                 'name' => $name,
                 'user_id' => $userId,
@@ -105,6 +116,7 @@ class VirtualStorageService
     {
         $this->db->getPdo()->beginTransaction();
         try {
+            $repoIds = $this->validateRepositoryOwnership($userId, $repoIds);
             $this->db->update('virtual_storages', [
                 'name' => $name,
                 'user_id' => $userId,
@@ -117,6 +129,27 @@ class VirtualStorageService
             $this->db->getPdo()->rollBack();
             throw $e;
         }
+    }
+
+    public function getOwnerConflictsForAgent(int $agentId, ?int $newUserId): array
+    {
+        $params = [$agentId];
+        $ownerClause = '1=1';
+        if ($newUserId !== null) {
+            $ownerClause = 'vs.user_id != ?';
+            $params[] = $newUserId;
+        }
+
+        return $this->db->fetchAll("
+            SELECT DISTINCT vs.id, vs.name, vs.user_id, u.username
+            FROM virtual_storage_repositories vsr
+            JOIN repositories r ON r.id = vsr.repository_id
+            JOIN virtual_storages vs ON vs.id = vsr.virtual_storage_id
+            JOIN users u ON u.id = vs.user_id
+            WHERE r.agent_id = ?
+              AND {$ownerClause}
+            ORDER BY vs.name
+        ", $params);
     }
 
     public function delete(int $id): void
@@ -188,6 +221,43 @@ class VirtualStorageService
                 'repository_id' => $repoId,
             ]);
         }
+    }
+
+    private function validateRepositoryOwnership(int $userId, array $repoIds): array
+    {
+        $repoIds = array_values(array_unique(array_filter(array_map('intval', $repoIds))));
+        if (empty($repoIds)) {
+            throw new \InvalidArgumentException('Select at least one repository for this virtual storage.');
+        }
+
+        $placeholders = implode(',', array_fill(0, count($repoIds), '?'));
+        $repos = $this->db->fetchAll("
+            SELECT r.id, r.name, a.name AS agent_name, a.user_id, u.username
+            FROM repositories r
+            JOIN agents a ON a.id = r.agent_id
+            LEFT JOIN users u ON u.id = a.user_id
+            WHERE r.id IN ({$placeholders})
+        ", $repoIds);
+
+        if (count($repos) !== count($repoIds)) {
+            throw new \InvalidArgumentException('One or more selected repositories no longer exist.');
+        }
+
+        $invalid = [];
+        foreach ($repos as $repo) {
+            if ((int) ($repo['user_id'] ?? 0) !== $userId) {
+                $owner = $repo['username'] ?: 'no owner';
+                $invalid[] = "{$repo['agent_name']} / {$repo['name']} ({$owner})";
+            }
+        }
+
+        if (!empty($invalid)) {
+            throw new \InvalidArgumentException(
+                'Virtual storage can only include repositories from clients owned by the selected user: ' . implode(', ', $invalid)
+            );
+        }
+
+        return $repoIds;
     }
 
     private function decorate(array $virtualStorages): array

@@ -5,6 +5,7 @@ namespace BBS\Controllers;
 use BBS\Core\Controller;
 use BBS\Services\PermissionService;
 use BBS\Services\TwoFactorService;
+use BBS\Services\VirtualStorageService;
 
 class UserController extends Controller
 {
@@ -134,51 +135,28 @@ class UserController extends Controller
         if (!empty($_POST['password'])) {
             $data['password_hash'] = password_hash($_POST['password'], PASSWORD_BCRYPT);
         }
-        $data['all_clients'] = isset($_POST['all_clients']) ? 1 : 0;
+        $data['all_clients'] = 0;
+
+        $newRole = $_POST['role'] ?? $user['role'];
+        if ($newRole === 'admin') {
+            $ownedClientCount = (int) ($this->db->fetchOne("SELECT COUNT(*) AS cnt FROM agents WHERE user_id = ?", [$id])['cnt'] ?? 0);
+            $ownedVirtualStorageCount = (int) ($this->db->fetchOne("SELECT COUNT(*) AS cnt FROM virtual_storages WHERE user_id = ?", [$id])['cnt'] ?? 0);
+            if ($ownedClientCount > 0 || $ownedVirtualStorageCount > 0) {
+                $this->flash('danger', 'Cannot promote this user to admin while they own clients or virtual storage. Move those resources first.');
+                $this->redirect("/users/{$id}/edit");
+            }
+        }
 
         if (!empty($data)) {
             $this->db->update('users', $data, 'id = ?', [$id]);
         }
 
-        // Update permissions (only for non-admin users)
-        $newRole = $_POST['role'] ?? $user['role'];
+        // Update client ownership (only for non-admin users). The permission
+        // rows are synchronized from ownership so there is one source of truth.
         if ($newRole !== 'admin') {
-            $permService = new PermissionService();
-            $allClients = !empty($_POST['all_clients']);
-
-            // Assign agents (only if not all_clients)
-            if (!$allClients) {
-                $agentIds = $_POST['agents'] ?? [];
-                $permService->assignAgents($id, $agentIds);
-            } else {
-                // Clear agent assignments when all_clients is enabled
-                $permService->assignAgents($id, []);
-            }
-
-            // Set permissions based on form mode
-            $permissions = [];
-
-            if ($allClients) {
-                // All clients mode: use global permission checkboxes (perm_global_{permission})
-                foreach (PermissionService::ALL_PERMISSIONS as $perm) {
-                    if (isset($_POST['perm_global_' . $perm])) {
-                        $permissions[] = ['permission' => $perm, 'agent_id' => null];
-                    }
-                }
-            } else {
-                // Specific clients mode: use per-agent permission checkboxes (perm_{permission}_{agent_id})
-                $assignedAgentIds = $_POST['agents'] ?? [];
-                foreach (PermissionService::ALL_PERMISSIONS as $perm) {
-                    foreach ($assignedAgentIds as $agentId) {
-                        if (isset($_POST['perm_' . $perm . '_' . $agentId])) {
-                            $permissions[] = ['permission' => $perm, 'agent_id' => (int) $agentId];
-                        }
-                    }
-                }
-            }
-            $permService->setPermissions($id, $permissions);
+            $this->syncUserOwnedClients($id, $_POST['agents'] ?? []);
         } else {
-            // Admin users don't need permissions - clear them
+            // Admin users don't need explicit permissions - clear any stale rows.
             $permService = new PermissionService();
             $permService->assignAgents($id, []);
             $permService->setPermissions($id, []);
@@ -186,6 +164,62 @@ class UserController extends Controller
 
         $this->flash('success', 'User updated.');
         $this->redirect('/users');
+    }
+
+    private function syncUserOwnedClients(int $userId, array $agentIds): void
+    {
+        $targetIds = array_values(array_unique(array_filter(array_map('intval', $agentIds))));
+        if (!empty($targetIds)) {
+            $placeholders = implode(',', array_fill(0, count($targetIds), '?'));
+            $existingCount = (int) ($this->db->fetchOne(
+                "SELECT COUNT(*) AS cnt FROM agents WHERE id IN ({$placeholders})",
+                $targetIds
+            )['cnt'] ?? 0);
+            if ($existingCount !== count($targetIds)) {
+                $this->flash('danger', 'One or more selected clients no longer exist.');
+                $this->redirect("/users/{$userId}/edit");
+            }
+        }
+
+        $currentRows = $this->db->fetchAll("SELECT id FROM agents WHERE user_id = ?", [$userId]);
+        $currentIds = array_values(array_map('intval', array_column($currentRows, 'id')));
+        $toRemove = array_diff($currentIds, $targetIds);
+        $toAssign = $targetIds;
+
+        $virtualStorage = new VirtualStorageService();
+        foreach ($toRemove as $agentId) {
+            $conflicts = $virtualStorage->getOwnerConflictsForAgent((int) $agentId, null);
+            if (!empty($conflicts)) {
+                $this->flash('danger', 'Cannot remove client ownership while its repositories are assigned to Virtual Storage. Remove or move those repositories first.');
+                $this->redirect("/users/{$userId}/edit");
+            }
+        }
+        foreach ($toAssign as $agentId) {
+            $conflicts = $virtualStorage->getOwnerConflictsForAgent((int) $agentId, $userId);
+            if (!empty($conflicts)) {
+                $names = array_map(fn($vs) => "\"{$vs['name']}\" owned by {$vs['username']}", $conflicts);
+                $this->flash('danger', 'Cannot assign client. Its repositories are already assigned to Virtual Storage ' . implode(', ', $names) . '. Remove or move those repositories first.');
+                $this->redirect("/users/{$userId}/edit");
+            }
+        }
+
+        $permService = new PermissionService();
+        $this->db->getPdo()->beginTransaction();
+        try {
+            foreach ($toRemove as $agentId) {
+                $this->db->update('agents', ['user_id' => null], 'id = ? AND user_id = ?', [(int) $agentId, $userId]);
+                $permService->syncAgentOwner((int) $agentId, null);
+            }
+            foreach ($toAssign as $agentId) {
+                $this->db->update('agents', ['user_id' => $userId], 'id = ?', [(int) $agentId]);
+                $permService->syncAgentOwner((int) $agentId, $userId);
+            }
+            $this->db->getPdo()->commit();
+        } catch (\Throwable $e) {
+            $this->db->getPdo()->rollBack();
+            $this->flash('danger', 'Client ownership update failed: ' . $e->getMessage());
+            $this->redirect("/users/{$userId}/edit");
+        }
     }
 
     public function reset2fa(int $id): void

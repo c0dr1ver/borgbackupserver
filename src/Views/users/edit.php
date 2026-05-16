@@ -70,56 +70,23 @@ $columnLabels = [
         </div>
     </div>
 
-    <!-- Client Access & Permissions (hidden for admins) -->
+    <!-- Owned Clients (hidden for admins) -->
     <div class="card border-0 shadow-sm mb-4" id="clientAccessCard" style="<?= $user['role'] === 'admin' ? 'display:none' : '' ?>">
         <div class="card-header border-0">
-            <h6 class="mb-0"><i class="bi bi-pc-display me-2"></i>Client Access & Permissions</h6>
+            <h6 class="mb-0"><i class="bi bi-pc-display me-2"></i>Owned Clients</h6>
         </div>
         <div class="card-body">
-            <div class="rounded-3 p-3 mb-3 d-flex align-items-center <?= $user['all_clients'] ? 'bg-info bg-opacity-10 border border-info border-opacity-25' : 'bg-body-secondary' ?>" id="allClientsCallout">
-                <div class="form-check mb-0">
-                    <input class="form-check-input" type="checkbox" name="all_clients" id="allClientsCheck" value="1" <?= $user['all_clients'] ? 'checked' : '' ?>>
-                    <label class="form-check-label fw-semibold" for="allClientsCheck">
-                        Access All Clients
-                    </label>
-                    <div class="text-muted small">User will have access to all current and future clients</div>
-                </div>
-            </div>
-
-            <!-- All Clients Permissions (shown when all_clients is checked) -->
-            <div id="allClientsPermsDiv" style="<?= $user['all_clients'] ? '' : 'display:none' ?>">
-                <p class="text-muted small mb-2">Grant permissions for all clients:</p>
-                <div class="d-flex flex-wrap gap-3">
-                    <?php foreach ($allPermissions as $perm): ?>
-                    <?php $data = $permissionData[$perm]; ?>
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" name="perm_global_<?= $perm ?>" id="perm_global_<?= $perm ?>" value="1"
-                            <?= $data['global'] ? 'checked' : '' ?>>
-                        <label class="form-check-label" for="perm_global_<?= $perm ?>">
-                            <?= htmlspecialchars($columnLabels[$perm] ?? $permissionLabels[$perm]) ?>
-                        </label>
-                    </div>
-                    <?php endforeach; ?>
-                </div>
-            </div>
-
-            <!-- Specific Clients Table (shown when all_clients is unchecked) -->
-            <div id="specificClientsDiv" style="<?= $user['all_clients'] ? 'display:none' : '' ?>">
+            <p class="text-muted small mb-2">Assigned clients grant full management rights for backup jobs, plans, repositories, restores, and maintenance. Admins always manage all clients.</p>
+            <div id="specificClientsDiv">
                 <?php if (empty($allAgents)): ?>
                 <p class="text-muted">No clients available</p>
                 <?php else: ?>
-                <p class="text-muted small mb-2">Select clients and their permissions:</p>
                 <div class="table-responsive">
                     <table class="table table-sm table-hover align-middle mb-0">
                         <thead class="table-light">
                             <tr>
                                 <th>Client</th>
-                                <th class="text-center" style="width: 70px;"><small>View</small></th>
-                                <?php foreach ($allPermissions as $perm): ?>
-                                <th class="text-center" style="width: 95px;">
-                                    <small><?= htmlspecialchars($columnLabels[$perm] ?? $permissionLabels[$perm]) ?></small>
-                                </th>
-                                <?php endforeach; ?>
+                                <th class="text-center" style="width: 120px;"><small>Owner</small></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -137,19 +104,6 @@ $columnLabels = [
                                         data-agent-id="<?= $agent['id'] ?>"
                                         <?= $isAssigned ? 'checked' : '' ?>>
                                 </td>
-                                <?php foreach ($allPermissions as $perm): ?>
-                                <?php
-                                    $data = $permissionData[$perm];
-                                    $hasPermForAgent = $data['global'] || in_array($agent['id'], $data['agent_ids']);
-                                ?>
-                                <td class="text-center perm-cell" data-agent-id="<?= $agent['id'] ?>">
-                                    <input class="form-check-input perm-checkbox" type="checkbox"
-                                        name="perm_<?= $perm ?>_<?= $agent['id'] ?>" value="1"
-                                        data-agent-id="<?= $agent['id'] ?>" data-perm="<?= $perm ?>"
-                                        <?= $hasPermForAgent && $isAssigned ? 'checked' : '' ?>
-                                        <?= $isAssigned ? '' : 'disabled' ?>>
-                                </td>
-                                <?php endforeach; ?>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -159,12 +113,6 @@ $columnLabels = [
                                 <td class="text-center">
                                     <input type="checkbox" class="form-check-input" id="selectAllClients" title="Select/Deselect All">
                                 </td>
-                                <?php foreach ($allPermissions as $perm): ?>
-                                <td class="text-center">
-                                    <input type="checkbox" class="form-check-input select-all-perm"
-                                        data-perm="<?= $perm ?>" title="Select all <?= htmlspecialchars($columnLabels[$perm] ?? $permissionLabels[$perm]) ?>">
-                                </td>
-                                <?php endforeach; ?>
                             </tr>
                         </tfoot>
                     </table>
@@ -214,9 +162,6 @@ $columnLabels = [
 document.addEventListener('DOMContentLoaded', function() {
     const roleSelect = document.getElementById('roleSelect');
     const clientAccessCard = document.getElementById('clientAccessCard');
-    const allClientsCheck = document.getElementById('allClientsCheck');
-    const allClientsPermsDiv = document.getElementById('allClientsPermsDiv');
-    const specificClientsDiv = document.getElementById('specificClientsDiv');
     const selectAllClients = document.getElementById('selectAllClients');
 
     // Toggle client access based on role
@@ -225,39 +170,20 @@ document.addEventListener('DOMContentLoaded', function() {
         clientAccessCard.style.display = isAdmin ? 'none' : '';
     });
 
-    // Toggle between all clients and specific clients
-    const allClientsCallout = document.getElementById('allClientsCallout');
-    allClientsCheck.addEventListener('change', function() {
-        allClientsPermsDiv.style.display = this.checked ? '' : 'none';
-        specificClientsDiv.style.display = this.checked ? 'none' : '';
-        if (this.checked) {
-            allClientsCallout.className = 'rounded-3 p-3 mb-3 d-flex align-items-center bg-info bg-opacity-10 border border-info border-opacity-25';
-        } else {
-            allClientsCallout.className = 'rounded-3 p-3 mb-3 d-flex align-items-center bg-body-secondary';
-        }
-    });
-
-    // Handle client checkbox changes - enable/disable permission checkboxes
+    // Handle client checkbox changes.
     document.querySelectorAll('.client-checkbox').forEach(function(checkbox) {
         checkbox.addEventListener('change', function() {
-            const agentId = this.dataset.agentId;
             const row = this.closest('tr');
-            const permCheckboxes = row.querySelectorAll('.perm-checkbox');
             const clientName = row.querySelector('.client-name');
 
             if (this.checked) {
                 row.classList.remove('table-light');
                 clientName.classList.add('fw-semibold');
                 clientName.classList.remove('text-muted');
-                permCheckboxes.forEach(cb => cb.disabled = false);
             } else {
                 row.classList.add('table-light');
                 clientName.classList.remove('fw-semibold');
                 clientName.classList.add('text-muted');
-                permCheckboxes.forEach(cb => {
-                    cb.disabled = true;
-                    cb.checked = false;
-                });
             }
             updateSelectAllState();
         });
@@ -275,19 +201,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Select all for a specific permission column
-    document.querySelectorAll('.select-all-perm').forEach(function(checkbox) {
-        checkbox.addEventListener('change', function() {
-            const perm = this.dataset.perm;
-            const isChecked = this.checked;
-            document.querySelectorAll(`.perm-checkbox[data-perm="${perm}"]`).forEach(cb => {
-                if (!cb.disabled) {
-                    cb.checked = isChecked;
-                }
-            });
-        });
-    });
-
     // Update select-all checkbox state based on individual checkboxes
     function updateSelectAllState() {
         if (!selectAllClients) return;
@@ -295,15 +208,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const checkedCount = document.querySelectorAll('.client-checkbox:checked').length;
         selectAllClients.checked = checkedCount === allCheckboxes.length;
         selectAllClients.indeterminate = checkedCount > 0 && checkedCount < allCheckboxes.length;
-
-        // Update permission column select-all states
-        document.querySelectorAll('.select-all-perm').forEach(function(selectAll) {
-            const perm = selectAll.dataset.perm;
-            const enabledPerms = document.querySelectorAll(`.perm-checkbox[data-perm="${perm}"]:not(:disabled)`);
-            const checkedPerms = document.querySelectorAll(`.perm-checkbox[data-perm="${perm}"]:not(:disabled):checked`);
-            selectAll.checked = enabledPerms.length > 0 && checkedPerms.length === enabledPerms.length;
-            selectAll.indeterminate = checkedPerms.length > 0 && checkedPerms.length < enabledPerms.length;
-        });
     }
 
     // Initial state update

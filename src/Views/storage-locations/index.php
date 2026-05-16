@@ -1315,6 +1315,8 @@ $s3SyncServerBackups = ($settings['s3_sync_server_backups'] ?? '0') === '1';
 $reposByAgent = [];
 foreach ($virtualStorageRepos ?? [] as $repo) {
     $reposByAgent[$repo['agent_id']]['name'] = $repo['agent_name'];
+    $reposByAgent[$repo['agent_id']]['owner_user_id'] = $repo['owner_user_id'] ?? null;
+    $reposByAgent[$repo['agent_id']]['owner_username'] = $repo['owner_username'] ?? null;
     $reposByAgent[$repo['agent_id']]['repos'][] = $repo;
 }
 $renderRepoCheckboxes = function (array $selectedIds = []) use ($reposByAgent) {
@@ -1324,12 +1326,13 @@ $renderRepoCheckboxes = function (array $selectedIds = []) use ($reposByAgent) {
     <?php else: ?>
         <div class="border rounded p-2" style="max-height: 260px; overflow:auto;">
             <?php foreach ($reposByAgent as $agentId => $group): ?>
-            <div class="mb-2">
+            <div class="mb-2" data-vs-repo-group>
                 <div class="small fw-semibold text-muted mb-1">
                     <i class="bi bi-display me-1"></i><?= htmlspecialchars($group['name']) ?>
+                    <span class="fw-normal">(<?= htmlspecialchars($group['owner_username'] ?? 'no owner') ?>)</span>
                 </div>
                 <?php foreach ($group['repos'] as $repo): ?>
-                <label class="form-check d-flex align-items-center gap-2 mb-1">
+                <label class="form-check d-flex align-items-center gap-2 mb-1" data-vs-repo-row data-owner-user-id="<?= htmlspecialchars((string) ($repo['owner_user_id'] ?? '')) ?>">
                     <input class="form-check-input mt-0" type="checkbox" name="repositories[]" value="<?= (int) $repo['id'] ?>" <?= in_array((int) $repo['id'], $selectedIds, true) ? 'checked' : '' ?>>
                     <span class="small flex-grow-1">
                         <?= htmlspecialchars($repo['name']) ?>
@@ -1356,7 +1359,7 @@ $renderRepoCheckboxes = function (array $selectedIds = []) use ($reposByAgent) {
         <div class="collapse mb-3" id="addVirtualStorageForm">
             <div class="card border bg-body-tertiary">
                 <div class="card-body">
-                    <form method="POST" action="/storage-locations/virtual">
+                    <form method="POST" action="/storage-locations/virtual" class="virtual-storage-form">
                         <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
                         <div class="row g-3">
                             <div class="col-lg-3">
@@ -1365,7 +1368,7 @@ $renderRepoCheckboxes = function (array $selectedIds = []) use ($reposByAgent) {
                             </div>
                             <div class="col-lg-3">
                                 <label class="form-label fw-semibold">User</label>
-                                <select class="form-select" name="user_id" required>
+                                <select class="form-select virtual-storage-user" name="user_id" required>
                                     <option value="">Select user...</option>
                                     <?php foreach ($virtualStorageUsers ?? [] as $u): ?>
                                     <option value="<?= (int) $u['id'] ?>"><?= htmlspecialchars($u['username']) ?> &lt;<?= htmlspecialchars($u['email']) ?>&gt;</option>
@@ -1482,7 +1485,7 @@ $renderRepoCheckboxes = function (array $selectedIds = []) use ($reposByAgent) {
             <div class="modal fade" id="editVirtualStorageModal<?= (int) $vs['id'] ?>" tabindex="-1">
                 <div class="modal-dialog modal-lg">
                     <div class="modal-content">
-                        <form method="POST" action="/storage-locations/virtual/<?= (int) $vs['id'] ?>/update">
+                        <form method="POST" action="/storage-locations/virtual/<?= (int) $vs['id'] ?>/update" class="virtual-storage-form">
                             <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
                             <div class="modal-header">
                                 <h5 class="modal-title">Edit Virtual Storage</h5>
@@ -1496,7 +1499,7 @@ $renderRepoCheckboxes = function (array $selectedIds = []) use ($reposByAgent) {
                                     </div>
                                     <div class="col-md-4">
                                         <label class="form-label fw-semibold">User</label>
-                                        <select class="form-select" name="user_id" required>
+                                        <select class="form-select virtual-storage-user" name="user_id" required>
                                             <?php foreach ($virtualStorageUsers ?? [] as $u): ?>
                                             <option value="<?= (int) $u['id'] ?>" <?= (int) $u['id'] === (int) $vs['user_id'] ? 'selected' : '' ?>><?= htmlspecialchars($u['username']) ?> &lt;<?= htmlspecialchars($u['email']) ?>&gt;</option>
                                             <?php endforeach; ?>
@@ -1578,6 +1581,40 @@ function deleteRemoteSsh(id, name) {
     document.body.appendChild(form);
     form.submit();
 }
+
+function filterVirtualStorageRepos(form) {
+    var ownerSelect = form.querySelector('.virtual-storage-user');
+    if (!ownerSelect) return;
+
+    var ownerId = ownerSelect.value || '';
+    form.querySelectorAll('[data-vs-repo-row]').forEach(function(row) {
+        var matches = ownerId !== '' && row.dataset.ownerUserId === ownerId;
+        var checkbox = row.querySelector('input[type="checkbox"]');
+        row.style.display = matches ? '' : 'none';
+        if (checkbox) {
+            checkbox.disabled = !matches;
+            if (!matches) checkbox.checked = false;
+        }
+    });
+
+    form.querySelectorAll('[data-vs-repo-group]').forEach(function(group) {
+        var hasVisibleRepo = false;
+        group.querySelectorAll('[data-vs-repo-row]').forEach(function(row) {
+            if (row.style.display !== 'none') hasVisibleRepo = true;
+        });
+        group.style.display = hasVisibleRepo ? '' : 'none';
+    });
+}
+
+document.querySelectorAll('.virtual-storage-form').forEach(function(form) {
+    filterVirtualStorageRepos(form);
+    var ownerSelect = form.querySelector('.virtual-storage-user');
+    if (ownerSelect) {
+        ownerSelect.addEventListener('change', function() {
+            filterVirtualStorageRepos(form);
+        });
+    }
+});
 </script>
 
 <?php endif; ?>

@@ -415,7 +415,12 @@ class StorageLocationController extends Controller
         $this->verifyCsrf();
 
         [$name, $userId, $quotaBytes, $repoIds, $strictMode] = $this->readVirtualStorageInput();
-        (new VirtualStorageService())->create($name, $userId, $quotaBytes, $repoIds, $strictMode);
+        try {
+            (new VirtualStorageService())->create($name, $userId, $quotaBytes, $repoIds, $strictMode);
+        } catch (\InvalidArgumentException $e) {
+            $this->flash('danger', $e->getMessage());
+            $this->redirect('/storage-locations');
+        }
 
         $this->flash('success', "Virtual storage \"{$name}\" created.");
         $this->redirect('/storage-locations');
@@ -433,7 +438,12 @@ class StorageLocationController extends Controller
         }
 
         [$name, $userId, $quotaBytes, $repoIds, $strictMode] = $this->readVirtualStorageInput();
-        (new VirtualStorageService())->update($id, $name, $userId, $quotaBytes, $repoIds, $strictMode);
+        try {
+            (new VirtualStorageService())->update($id, $name, $userId, $quotaBytes, $repoIds, $strictMode);
+        } catch (\InvalidArgumentException $e) {
+            $this->flash('danger', $e->getMessage());
+            $this->redirect('/storage-locations');
+        }
 
         $this->flash('success', "Virtual storage \"{$name}\" updated.");
         $this->redirect('/storage-locations');
