@@ -1,5 +1,6 @@
 <?php
 $sizeLabel = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $totalSize) : '0';
+$isAdmin = $this->isAdmin();
 ?>
 
 <!-- Breadcrumb -->
@@ -23,10 +24,12 @@ $sizeLabel = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $tota
                     <span class="badge text-bg-info ms-2" style="font-size: 0.6em; vertical-align: middle;"><i class="bi bi-hdd-network me-1"></i>Remote SSH</span>
                     <?php else: ?>
                     <span class="badge text-bg-secondary ms-2" style="font-size: 0.6em; vertical-align: middle;"><i class="bi bi-hdd me-1"></i>Local</span>
+                    <?php if ($isAdmin): ?>
                     <button type="button" class="btn btn-sm btn-link text-muted p-0 ms-2" id="renameToggle" title="Rename repository"><i class="bi bi-pencil"></i></button>
                     <?php endif; ?>
+                    <?php endif; ?>
                 </h4>
-                <?php if (($repo['storage_type'] ?? 'local') !== 'remote_ssh'): ?>
+                <?php if ($isAdmin && ($repo['storage_type'] ?? 'local') !== 'remote_ssh'): ?>
                 <form method="POST" action="/repositories/<?= $repo['id'] ?>/rename" class="mt-2 d-none" id="renameForm">
                     <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
                     <div class="d-flex align-items-center gap-2">
@@ -104,12 +107,14 @@ $sizeLabel = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $tota
         <div class="card border-0 shadow-sm mb-4">
             <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-cloud text-info me-1"></i> S3 Offsite Mirror</span>
+                <?php if ($isAdmin): ?>
                 <form method="POST" action="/clients/<?= $agentId ?>/repo/<?= $repo['id'] ?>/s3-config/delete" class="d-inline" data-confirm="Disable S3 sync?&#10;&#10;The repository will no longer sync to S3 after backups. Data already in S3 will remain.">
                     <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
                     <button type="submit" class="btn btn-sm btn-outline-secondary">
                         <i class="bi bi-cloud-slash me-1"></i>Disable
                     </button>
                 </form>
+                <?php endif; ?>
             </div>
             <div class="card-body">
                 <div class="d-flex align-items-start gap-3 p-3 bg-body-secondary rounded mb-3">
@@ -127,6 +132,7 @@ $sizeLabel = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $tota
                     </div>
                 </div>
 
+                <?php if ($isAdmin): ?>
                 <div class="d-flex align-items-start gap-3 p-3 bg-body-secondary rounded">
                     <div class="text-primary" style="font-size: 1.5rem;">
                         <i class="bi bi-cloud-download"></i>
@@ -155,9 +161,10 @@ $sizeLabel = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $tota
                         </div>
                     </div>
                 </div>
+                <?php endif; ?>
             </div>
         </div>
-        <?php elseif (($repo['storage_type'] ?? 'local') !== 'remote_ssh' && !empty($s3PluginConfigs)): ?>
+        <?php elseif ($isAdmin && ($repo['storage_type'] ?? 'local') !== 'remote_ssh' && !empty($s3PluginConfigs)): ?>
         <div class="card border-0 shadow-sm mb-4">
             <div class="card-header fw-semibold">
                 <i class="bi bi-cloud text-muted me-1"></i> S3 Offsite Mirror
@@ -370,6 +377,7 @@ $sizeLabel = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $tota
         <?php endif; ?>
     </div>
 
+    <?php if ($isAdmin): ?>
     <!-- Maintenance Actions (Right) -->
     <div class="col-lg-6">
         <div class="card border-0 shadow-sm">
@@ -480,6 +488,7 @@ $sizeLabel = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $tota
             </div>
         </div>
     </div>
+    <?php endif; ?>
 </div>
 
 <!-- Archives -->
@@ -527,10 +536,12 @@ $sizeLabel = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $tota
                         <td><?= $origLabel ?></td>
                         <td><?= $dedupLabel ?></td>
                         <td class="text-end" onclick="event.stopPropagation()">
+                            <?php if ($isAdmin): ?>
                             <button type="button" class="btn btn-sm btn-outline-danger"
                                     data-bs-toggle="modal" data-bs-target="#deleteArchiveModal<?= $ar['id'] ?>">
                                 <i class="bi bi-trash"></i>
                             </button>
+                            <?php endif; ?>
                         </td>
                     </tr>
                     <?php endforeach; ?>
@@ -541,6 +552,7 @@ $sizeLabel = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $tota
     </div>
 </div>
 
+<?php if ($isAdmin): ?>
 <?php foreach ($archives as $ar): ?>
 <div class="modal fade" id="deleteArchiveModal<?= $ar['id'] ?>" tabindex="-1">
     <div class="modal-dialog">
@@ -570,9 +582,10 @@ $sizeLabel = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $tota
     </div>
 </div>
 <?php endforeach; ?>
+<?php endif; ?>
 
 <!-- Danger Zone -->
-<?php if ($this->isAdmin()): ?>
+<?php if ($isAdmin): ?>
 <hr class="mt-4 mb-0">
 <div class="card border-0 shadow-sm mt-4 border-danger">
     <div class="card-header fw-semibold text-danger">

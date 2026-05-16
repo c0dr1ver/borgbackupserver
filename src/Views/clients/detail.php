@@ -1,5 +1,6 @@
 <?php
 $tab = $_GET['tab'] ?? 'status';
+$isAdmin = $this->isAdmin();
 
 // Detect server's agent version from the bundled bbs-agent.py
 $serverAgentVersion = null;
@@ -720,6 +721,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
         ?>
         <div class="col-md-6 col-lg-4">
             <div class="card border-0 shadow-sm h-100 repo-card position-relative" style="cursor: pointer; overflow: visible;" onclick="window.location='/clients/<?= $agent['id'] ?>/repo/<?= $repo['id'] ?>'">
+                <?php if ($isAdmin): ?>
                 <!-- Maintenance menu in upper right -->
                 <div class="position-absolute dropdown" style="top: 6px; right: 6px; z-index: 10;" onclick="event.stopPropagation()">
                     <button class="btn btn-sm btn-link text-muted p-1" type="button" data-bs-toggle="dropdown" data-bs-strategy="fixed" aria-expanded="false" title="Actions">
@@ -769,6 +771,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
                         </li>
                     </ul>
                 </div>
+                <?php endif; ?>
                 <div class="card-body p-3">
                     <div class="d-flex align-items-center">
                         <?php $isRemoteRepo = ($repo['storage_type'] ?? 'local') === 'remote_ssh'; ?>
@@ -804,6 +807,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
             </div>
         </div>
         <?php endforeach; ?>
+        <?php if ($isAdmin): ?>
         <div class="col-md-6 col-lg-4">
             <div class="card border-0 shadow-sm h-100 card-dashed" onclick="showCreateRepo()">
                 <div class="card-body d-flex flex-column align-items-center justify-content-center text-muted p-4">
@@ -820,9 +824,11 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
                 </div>
             </div>
         </div>
+        <?php endif; ?>
     </div>
 
     <!-- Delete Repo Modals (for repos with S3 sync) -->
+    <?php if ($isAdmin): ?>
     <?php foreach ($repositories as $repo): ?>
     <?php if (isset($s3SyncByRepo[$repo['id']])): ?>
     <div class="modal fade" id="deleteRepoModal<?= $repo['id'] ?>" tabindex="-1" aria-hidden="true">
@@ -856,6 +862,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
     </div>
     <?php endif; ?>
     <?php endforeach; ?>
+    <?php endif; ?>
 
     <?php endif; ?>
     <?php if (empty($repositories)): ?>
@@ -863,17 +870,23 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
         <div class="card border-0 shadow-sm mb-4 card-dashed">
             <div class="card-body d-flex flex-column align-items-center justify-content-center text-muted py-5">
                 <i class="bi bi-archive" style="font-size:2rem;"></i>
+                <?php if ($isAdmin): ?>
                 <div class="mt-2 fw-semibold">Create a Repository to get started</div>
                 <small class="mt-1 text-center" style="max-width:400px;">A repository is a virtual disk where your backup data is stored on the backup server.</small>
                 <div class="mt-3 d-flex gap-2">
                     <span class="btn btn-sm btn-outline-primary" style="cursor:pointer;" onclick="showCreateRepo()"><i class="bi bi-plus-circle me-1"></i>Add Repository</span>
                     <span class="btn btn-sm btn-outline-secondary" style="cursor:pointer;" onclick="showImportRepo()"><i class="bi bi-box-arrow-in-down me-1"></i>Import Existing</span>
                 </div>
+                <?php else: ?>
+                <div class="mt-2 fw-semibold">No repositories assigned</div>
+                <small class="mt-1 text-center" style="max-width:400px;">An administrator must add repositories before backup jobs can be configured.</small>
+                <?php endif; ?>
             </div>
         </div>
     </div>
     <?php endif; ?>
 
+    <?php if ($isAdmin): ?>
     <!-- Create new repo -->
     <div id="create-repo-section" style="display:none;">
     <div class="card border-0 shadow-sm">
@@ -1121,8 +1134,9 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
         </div>
     </div>
     </div>
+    <?php endif; ?>
 
-    <?php if (!empty($s3Orphans)): ?>
+    <?php if ($isAdmin && !empty($s3Orphans)): ?>
     <!-- S3 Offsite Backups (Orphaned) -->
     <div class="card border-0 shadow-sm mt-4">
         <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
@@ -1168,9 +1182,12 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
     <?php endif; ?>
 
     <script>
-    document.getElementById('encryptionSelect').addEventListener('change', function() {
-        document.getElementById('passphraseRow').style.display = this.value === 'none' ? 'none' : 'flex';
-    });
+    const encryptionSelect = document.getElementById('encryptionSelect');
+    if (encryptionSelect) {
+        encryptionSelect.addEventListener('change', function() {
+            document.getElementById('passphraseRow').style.display = this.value === 'none' ? 'none' : 'flex';
+        });
+    }
     document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
     </script>
 

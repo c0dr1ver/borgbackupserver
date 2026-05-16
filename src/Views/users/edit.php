@@ -5,17 +5,6 @@
     </a>
 </div>
 
-<?php
-// Custom column labels for the permission table
-$columnLabels = [
-    'trigger_backup' => 'Run Backups',
-    'manage_repos' => 'Manage Repos',
-    'manage_plans' => 'Manage Plans',
-    'restore' => 'Perform Restores',
-    'repo_maintenance' => 'Repo Maint',
-];
-?>
-
 <form method="POST" action="/users/<?= $user['id'] ?>/edit">
     <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
 
@@ -76,7 +65,7 @@ $columnLabels = [
             <h6 class="mb-0"><i class="bi bi-pc-display me-2"></i>Owned Clients</h6>
         </div>
         <div class="card-body">
-            <p class="text-muted small mb-2">Assigned clients grant full management rights for backup jobs, plans, repositories, restores, and maintenance. Admins always manage all clients.</p>
+            <p class="text-muted small mb-2">Assigned clients grant rights to run backups, manage backup plans, and restore data. Repository creation, import, deletion, and maintenance remain admin-only.</p>
             <div id="specificClientsDiv">
                 <?php if (empty($allAgents)): ?>
                 <p class="text-muted">No clients available</p>

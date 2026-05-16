@@ -5,7 +5,6 @@ namespace BBS\Controllers;
 use BBS\Core\Controller;
 use BBS\Services\BorgCommandBuilder;
 use BBS\Services\Encryption;
-use BBS\Services\PermissionService;
 use BBS\Services\RemoteSshService;
 use BBS\Services\S3SyncService;
 use BBS\Services\SshKeyManager;
@@ -50,7 +49,7 @@ class RepositoryController extends Controller
 
     public function store(): void
     {
-        $this->requireAuth();
+        $this->requireAdmin();
         $this->verifyCsrf();
 
         $agentId = (int) ($_POST['agent_id'] ?? 0);
@@ -71,13 +70,13 @@ class RepositoryController extends Controller
             $this->redirect("/clients/{$agentId}");
         }
 
-        // Verify agent access and manage_repos permission
+        // Repository lifecycle is admin-only. Users may use assigned repos in jobs/plans,
+        // but cannot create or attach repositories to a client.
         $agent = $this->db->fetchOne("SELECT * FROM agents WHERE id = ?", [$agentId]);
-        if (!$agent || !$this->canAccessAgent($agentId)) {
+        if (!$agent) {
             $this->flash('danger', 'Access denied.');
             $this->redirect('/clients');
         }
-        $this->requirePermission(PermissionService::MANAGE_REPOS, $agentId);
 
         // Auto-generate passphrase if not provided and encryption is enabled
         if (empty($passphrase) && $encryption !== 'none') {
@@ -313,7 +312,7 @@ class RepositoryController extends Controller
 
     public function delete(int $id): void
     {
-        $this->requireAuth();
+        $this->requireAdmin();
         $this->verifyCsrf();
 
         $repo = $this->db->fetchOne("
@@ -323,13 +322,10 @@ class RepositoryController extends Controller
             WHERE r.id = ?
         ", [$id]);
 
-        if (!$repo || !$this->canAccessAgent($repo['agent_id'])) {
+        if (!$repo) {
             $this->flash('danger', 'Repository not found.');
             $this->redirect('/clients');
         }
-
-        // Require manage_repos permission to delete
-        $this->requirePermission(PermissionService::MANAGE_REPOS, $repo['agent_id']);
 
         $agentId = $repo['agent_id'];
 
@@ -457,7 +453,7 @@ class RepositoryController extends Controller
 
     public function rename(int $id): void
     {
-        $this->requireAuth();
+        $this->requireAdmin();
         $this->verifyCsrf();
 
         $newName = trim($_POST['name'] ?? '');
@@ -469,13 +465,12 @@ class RepositoryController extends Controller
             WHERE r.id = ?
         ", [$id]);
 
-        if (!$repo || !$this->canAccessAgent($repo['agent_id'])) {
+        if (!$repo) {
             $this->flash('danger', 'Repository not found.');
             $this->redirect('/clients');
         }
 
         $agentId = $repo['agent_id'];
-        $this->requirePermission(PermissionService::MANAGE_REPOS, $agentId);
 
         if (empty($newName)) {
             $this->flash('danger', 'Repository name cannot be empty.');
@@ -905,16 +900,14 @@ class RepositoryController extends Controller
 
     public function deleteArchive(int $agentId, int $id, int $archiveId): void
     {
-        $this->requireAuth();
+        $this->requireAdmin();
         $this->verifyCsrf();
 
         $repo = $this->db->fetchOne("SELECT r.* FROM repositories r WHERE r.id = ? AND r.agent_id = ?", [$id, $agentId]);
-        if (!$repo || !$this->canAccessAgent($agentId)) {
+        if (!$repo) {
             $this->flash('danger', 'Repository not found.');
             $this->redirect('/clients');
         }
-
-        $this->requirePermission(PermissionService::MANAGE_REPOS, $agentId);
 
         $archive = $this->db->fetchOne("SELECT * FROM archives WHERE id = ? AND repository_id = ?", [$archiveId, $id]);
         if (!$archive) {
@@ -953,7 +946,7 @@ class RepositoryController extends Controller
 
     public function maintenance(int $id): void
     {
-        $this->requireAuth();
+        $this->requireAdmin();
         $this->verifyCsrf();
 
         $action = $_POST['action'] ?? '';
@@ -970,13 +963,10 @@ class RepositoryController extends Controller
             WHERE r.id = ?
         ", [$id]);
 
-        if (!$repo || !$this->canAccessAgent($repo['agent_id'])) {
+        if (!$repo) {
             $this->flash('danger', 'Repository not found.');
             $this->redirect('/clients');
         }
-
-        // Require repo_maintenance permission
-        $this->requirePermission(PermissionService::REPO_MAINTENANCE, $repo['agent_id']);
 
         // Map action to task_type
         // "Rebuild Full" dispatches as catalog_sync which wipes archives,
@@ -1190,7 +1180,7 @@ class RepositoryController extends Controller
      */
     public function s3Restore(int $agentId, int $id): void
     {
-        $this->requireAuth();
+        $this->requireAdmin();
         $this->verifyCsrf();
 
         $mode = $_POST['mode'] ?? 'replace';
@@ -1202,13 +1192,10 @@ class RepositoryController extends Controller
             WHERE r.id = ? AND r.agent_id = ?
         ", [$id, $agentId]);
 
-        if (!$repo || !$this->canAccessAgent($agentId)) {
+        if (!$repo) {
             $this->flash('danger', 'Repository not found.');
             $this->redirect('/clients');
         }
-
-        // Require repo_maintenance permission for S3 restore
-        $this->requirePermission(PermissionService::REPO_MAINTENANCE, $agentId);
 
         // Get S3 config for this repo from repository_s3_configs
         $s3Config = $this->db->fetchOne("
@@ -1344,7 +1331,7 @@ class RepositoryController extends Controller
      */
     public function restoreOrphan(int $id): void
     {
-        $this->requireAuth();
+        $this->requireAdmin();
         $this->verifyCsrf();
 
         $repoName = trim($_POST['repo_name'] ?? '');
@@ -1355,15 +1342,11 @@ class RepositoryController extends Controller
             $this->redirect("/clients/{$id}?tab=repos");
         }
 
-        // Verify agent access
         $agent = $this->db->fetchOne("SELECT * FROM agents WHERE id = ?", [$id]);
-        if (!$agent || !$this->canAccessAgent($id)) {
+        if (!$agent) {
             $this->flash('danger', 'Access denied.');
             $this->redirect('/clients');
         }
-
-        // Require manage_repos permission
-        $this->requirePermission(PermissionService::MANAGE_REPOS, $id);
 
         // Check if repo already exists
         $existing = $this->db->fetchOne(
@@ -1445,16 +1428,14 @@ class RepositoryController extends Controller
      */
     public function s3Config(int $agentId, int $id): void
     {
-        $this->requireAuth();
+        $this->requireAdmin();
         $this->verifyCsrf();
 
         $repo = $this->db->fetchOne("SELECT * FROM repositories WHERE id = ? AND agent_id = ?", [$id, $agentId]);
-        if (!$repo || !$this->canAccessAgent($agentId)) {
+        if (!$repo) {
             $this->flash('danger', 'Repository not found.');
             $this->redirect('/clients');
         }
-
-        $this->requirePermission(PermissionService::MANAGE_REPOS, $agentId);
 
         $pluginConfigId = (int) ($_POST['plugin_config_id'] ?? 0);
         if ($pluginConfigId === 0) {
@@ -1510,16 +1491,14 @@ class RepositoryController extends Controller
      */
     public function s3ConfigDelete(int $agentId, int $id): void
     {
-        $this->requireAuth();
+        $this->requireAdmin();
         $this->verifyCsrf();
 
         $repo = $this->db->fetchOne("SELECT * FROM repositories WHERE id = ? AND agent_id = ?", [$id, $agentId]);
-        if (!$repo || !$this->canAccessAgent($agentId)) {
+        if (!$repo) {
             $this->flash('danger', 'Repository not found.');
             $this->redirect('/clients');
         }
-
-        $this->requirePermission(PermissionService::MANAGE_REPOS, $agentId);
 
         // Delete the S3 config (data remains in S3 bucket)
         $this->db->delete('repository_s3_configs', 'repository_id = ?', [$id]);
@@ -1542,6 +1521,10 @@ class RepositoryController extends Controller
     {
         $this->requireAuth();
         // Skip CSRF for AJAX — session auth is sufficient for same-origin POST
+        if (!$this->isAdmin()) {
+            $this->json(['status' => 'error', 'error' => 'Admin access required.'], 403);
+            return;
+        }
 
         $agentId = (int) ($_POST['agent_id'] ?? 0);
         $storageType = $_POST['storage_type'] ?? 'local';
@@ -1556,7 +1539,7 @@ class RepositoryController extends Controller
         }
 
         $agent = $this->db->fetchOne("SELECT * FROM agents WHERE id = ?", [$agentId]);
-        if (!$agent || !$this->canAccessAgent($agentId)) {
+        if (!$agent) {
             $this->json(['status' => 'error', 'error' => 'Access denied.']);
             return;
         }
@@ -1674,7 +1657,7 @@ class RepositoryController extends Controller
      */
     public function import(): void
     {
-        $this->requireAuth();
+        $this->requireAdmin();
         $this->verifyCsrf();
 
         $agentId = (int) ($_POST['agent_id'] ?? 0);
@@ -1692,12 +1675,11 @@ class RepositoryController extends Controller
         }
 
         $agent = $this->db->fetchOne("SELECT * FROM agents WHERE id = ?", [$agentId]);
-        if (!$agent || !$this->canAccessAgent($agentId)) {
+        if (!$agent) {
             $this->flash('danger', 'Access denied.');
             $this->redirect('/clients');
             return;
         }
-        $this->requirePermission(PermissionService::MANAGE_REPOS, $agentId);
 
         // Check for duplicate name
         $existing = $this->db->fetchOne(

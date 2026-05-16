@@ -27,10 +27,8 @@ FROM agents a
 JOIN users u ON u.id = a.user_id
 CROSS JOIN (
     SELECT 'trigger_backup' AS permission UNION ALL
-    SELECT 'manage_repos' UNION ALL
     SELECT 'manage_plans' UNION ALL
-    SELECT 'restore' UNION ALL
-    SELECT 'repo_maintenance'
+    SELECT 'restore'
 ) p
 WHERE a.user_id IS NOT NULL
   AND u.role != 'admin';

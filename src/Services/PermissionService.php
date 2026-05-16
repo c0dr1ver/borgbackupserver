@@ -23,6 +23,12 @@ class PermissionService
         self::REPO_MAINTENANCE,
     ];
 
+    public const OWNER_PERMISSIONS = [
+        self::TRIGGER_BACKUP,
+        self::MANAGE_PLANS,
+        self::RESTORE,
+    ];
+
     public const PERMISSION_LABELS = [
         self::TRIGGER_BACKUP => 'Trigger Backups',
         self::MANAGE_REPOS => 'Manage Repositories',
@@ -162,7 +168,7 @@ class PermissionService
             'agent_id' => $agentId,
         ]);
 
-        foreach (self::ALL_PERMISSIONS as $permission) {
+        foreach (self::OWNER_PERMISSIONS as $permission) {
             $this->db->insert('user_permissions', [
                 'user_id' => $userId,
                 'permission' => $permission,
