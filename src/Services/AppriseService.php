@@ -22,10 +22,24 @@ class AppriseService
     /**
      * Get all enabled services that should receive notifications for a given event type.
      */
-    public function getEnabledServicesForEvent(string $eventType): array
+    public function getEnabledServicesForEvent(string $eventType, ?int $agentId = null, ?int $userId = null): array
     {
+        $targetUserId = $userId;
+        if ($targetUserId === null && $agentId !== null) {
+            $agent = $this->db->fetchOne("SELECT user_id FROM agents WHERE id = ?", [$agentId]);
+            $targetUserId = !empty($agent['user_id']) ? (int) $agent['user_id'] : null;
+        }
+
+        $params = [];
+        $userClause = "user_id IS NULL";
+        if ($targetUserId !== null) {
+            $userClause = "(user_id IS NULL OR user_id = ?)";
+            $params[] = $targetUserId;
+        }
+
         $services = $this->db->fetchAll(
-            "SELECT * FROM notification_services WHERE enabled = 1"
+            "SELECT * FROM notification_services WHERE enabled = 1 AND {$userClause}",
+            $params
         );
 
         // Filter by event type (check JSON field)
@@ -95,13 +109,13 @@ class AppriseService
     /**
      * Send notification to all enabled services for a given event type.
      */
-    public function sendForEvent(string $eventType, string $title, string $body, ?int $agentId = null): int
+    public function sendForEvent(string $eventType, string $title, string $body, ?int $agentId = null, ?int $userId = null): int
     {
         if (!$this->isAppriseInstalled()) {
             return 0;
         }
 
-        $services = $this->getEnabledServicesForEvent($eventType);
+        $services = $this->getEnabledServicesForEvent($eventType, $agentId, $userId);
         $sent = 0;
 
         foreach ($services as $service) {

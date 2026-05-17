@@ -23,18 +23,12 @@ class PermissionService
         self::REPO_MAINTENANCE,
     ];
 
-    public const OWNER_PERMISSIONS = [
-        self::TRIGGER_BACKUP,
-        self::MANAGE_PLANS,
-        self::RESTORE,
-    ];
-
     public const PERMISSION_LABELS = [
-        self::TRIGGER_BACKUP => 'Trigger Backups',
-        self::MANAGE_REPOS => 'Manage Repositories',
-        self::MANAGE_PLANS => 'Manage Backup Plans',
+        self::TRIGGER_BACKUP => 'Run Backups',
+        self::MANAGE_REPOS => 'Manage Repos',
+        self::MANAGE_PLANS => 'Manage Plans',
         self::RESTORE => 'Perform Restores',
-        self::REPO_MAINTENANCE => 'Repository Maintenance',
+        self::REPO_MAINTENANCE => 'Repo Maintenance',
     ];
 
     public function __construct()
@@ -149,10 +143,12 @@ class PermissionService
     }
 
     /**
-     * Synchronize the single owner of a client with the permission tables.
+     * Synchronize the single owner of a client with access tables.
      *
      * agents.user_id is the admin-facing owner field. user_agents and
-     * user_permissions are the authorization cache used by controllers.
+     * user_permissions are the authorization tables used by controllers.
+     * Ownership grants View only; action permissions are assigned explicitly
+     * from /users/{id}/edit.
      */
     public function syncAgentOwner(int $agentId, ?int $userId): void
     {
@@ -167,14 +163,6 @@ class PermissionService
             'user_id' => $userId,
             'agent_id' => $agentId,
         ]);
-
-        foreach (self::OWNER_PERMISSIONS as $permission) {
-            $this->db->insert('user_permissions', [
-                'user_id' => $userId,
-                'permission' => $permission,
-                'agent_id' => $agentId,
-            ]);
-        }
     }
 
     public function syncAllAgentOwners(): void

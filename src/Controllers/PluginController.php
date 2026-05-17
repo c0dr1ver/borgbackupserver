@@ -3,6 +3,7 @@
 namespace BBS\Controllers;
 
 use BBS\Core\Controller;
+use BBS\Services\PermissionService;
 use BBS\Services\PluginManager;
 
 class PluginController extends Controller
@@ -17,10 +18,11 @@ class PluginController extends Controller
         $this->verifyCsrf();
 
         $agent = $this->db->fetchOne("SELECT * FROM agents WHERE id = ?", [$id]);
-        if (!$agent || (!$this->isAdmin() && $agent['user_id'] != $_SESSION['user_id'])) {
+        if (!$agent || !$this->canAccessAgent($id)) {
             $this->flash('danger', 'Access denied.');
             $this->redirect('/clients');
         }
+        $this->requirePermission(PermissionService::MANAGE_PLANS, $id);
 
         $pluginManager = new PluginManager();
         $selectedPlugins = array_map('intval', $_POST['plugins'] ?? []);

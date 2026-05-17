@@ -5,6 +5,7 @@ namespace BBS\Controllers;
 use BBS\Core\Controller;
 use BBS\Services\BorgCommandBuilder;
 use BBS\Services\Encryption;
+use BBS\Services\PermissionService;
 use BBS\Services\RemoteSshService;
 use BBS\Services\S3SyncService;
 use BBS\Services\SshKeyManager;
@@ -49,7 +50,7 @@ class RepositoryController extends Controller
 
     public function store(): void
     {
-        $this->requireAdmin();
+        $this->requireAuth();
         $this->verifyCsrf();
 
         $agentId = (int) ($_POST['agent_id'] ?? 0);
@@ -70,13 +71,12 @@ class RepositoryController extends Controller
             $this->redirect("/clients/{$agentId}");
         }
 
-        // Repository lifecycle is admin-only. Users may use assigned repos in jobs/plans,
-        // but cannot create or attach repositories to a client.
         $agent = $this->db->fetchOne("SELECT * FROM agents WHERE id = ?", [$agentId]);
-        if (!$agent) {
+        if (!$agent || !$this->canAccessAgent($agentId)) {
             $this->flash('danger', 'Access denied.');
             $this->redirect('/clients');
         }
+        $this->requirePermission(PermissionService::MANAGE_REPOS, $agentId);
 
         // Auto-generate passphrase if not provided and encryption is enabled
         if (empty($passphrase) && $encryption !== 'none') {
@@ -312,7 +312,7 @@ class RepositoryController extends Controller
 
     public function delete(int $id): void
     {
-        $this->requireAdmin();
+        $this->requireAuth();
         $this->verifyCsrf();
 
         $repo = $this->db->fetchOne("
@@ -328,6 +328,11 @@ class RepositoryController extends Controller
         }
 
         $agentId = $repo['agent_id'];
+        if (!$this->canAccessAgent((int) $agentId)) {
+            $this->flash('danger', 'Access denied.');
+            $this->redirect('/clients');
+        }
+        $this->requirePermission(PermissionService::MANAGE_REPOS, (int) $agentId);
 
         // Block if backup plans reference this repo
         $planCount = $this->db->fetchOne(
@@ -453,7 +458,7 @@ class RepositoryController extends Controller
 
     public function rename(int $id): void
     {
-        $this->requireAdmin();
+        $this->requireAuth();
         $this->verifyCsrf();
 
         $newName = trim($_POST['name'] ?? '');
@@ -471,6 +476,11 @@ class RepositoryController extends Controller
         }
 
         $agentId = $repo['agent_id'];
+        if (!$this->canAccessAgent((int) $agentId)) {
+            $this->flash('danger', 'Access denied.');
+            $this->redirect('/clients');
+        }
+        $this->requirePermission(PermissionService::MANAGE_REPOS, (int) $agentId);
 
         if (empty($newName)) {
             $this->flash('danger', 'Repository name cannot be empty.');
@@ -946,7 +956,7 @@ class RepositoryController extends Controller
 
     public function maintenance(int $id): void
     {
-        $this->requireAdmin();
+        $this->requireAuth();
         $this->verifyCsrf();
 
         $action = $_POST['action'] ?? '';
@@ -967,6 +977,11 @@ class RepositoryController extends Controller
             $this->flash('danger', 'Repository not found.');
             $this->redirect('/clients');
         }
+        if (!$this->canAccessAgent((int) $repo['agent_id'])) {
+            $this->flash('danger', 'Access denied.');
+            $this->redirect('/clients');
+        }
+        $this->requirePermission(PermissionService::REPO_MAINTENANCE, (int) $repo['agent_id']);
 
         // Map action to task_type
         // "Rebuild Full" dispatches as catalog_sync which wipes archives,
@@ -1170,6 +1185,7 @@ class RepositoryController extends Controller
             'totalOriginal' => (int) ($dedupStats['total_original'] ?? 0),
             'totalDedup' => (int) ($dedupStats['total_dedup'] ?? 0),
             'agentBorgVersion' => $agentInfo['borg_version'] ?? null,
+            'canMaintainRepos' => $this->hasPermission(PermissionService::REPO_MAINTENANCE, $agentId),
         ]);
     }
 
@@ -1520,11 +1536,7 @@ class RepositoryController extends Controller
     public function verifyImport(): void
     {
         $this->requireAuth();
-        // Skip CSRF for AJAX — session auth is sufficient for same-origin POST
-        if (!$this->isAdmin()) {
-            $this->json(['status' => 'error', 'error' => 'Admin access required.'], 403);
-            return;
-        }
+        $this->verifyCsrf();
 
         $agentId = (int) ($_POST['agent_id'] ?? 0);
         $storageType = $_POST['storage_type'] ?? 'local';
@@ -1539,8 +1551,8 @@ class RepositoryController extends Controller
         }
 
         $agent = $this->db->fetchOne("SELECT * FROM agents WHERE id = ?", [$agentId]);
-        if (!$agent) {
-            $this->json(['status' => 'error', 'error' => 'Access denied.']);
+        if (!$agent || !$this->canAccessAgent($agentId) || !$this->hasPermission(PermissionService::MANAGE_REPOS, $agentId)) {
+            $this->json(['status' => 'error', 'error' => 'Access denied.'], 403);
             return;
         }
 
@@ -1657,7 +1669,7 @@ class RepositoryController extends Controller
      */
     public function import(): void
     {
-        $this->requireAdmin();
+        $this->requireAuth();
         $this->verifyCsrf();
 
         $agentId = (int) ($_POST['agent_id'] ?? 0);
@@ -1675,11 +1687,12 @@ class RepositoryController extends Controller
         }
 
         $agent = $this->db->fetchOne("SELECT * FROM agents WHERE id = ?", [$agentId]);
-        if (!$agent) {
+        if (!$agent || !$this->canAccessAgent($agentId)) {
             $this->flash('danger', 'Access denied.');
             $this->redirect('/clients');
             return;
         }
+        $this->requirePermission(PermissionService::MANAGE_REPOS, $agentId);
 
         // Check for duplicate name
         $existing = $this->db->fetchOne(

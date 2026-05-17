@@ -1,7 +1,11 @@
 <?php
+$isAdminSettings = $isAdminSettings ?? $this->isAdmin();
 $activeTab = $_GET['tab'] ?? 'general';
+if (!$isAdminSettings && !in_array($activeTab, ['general', 'push'], true)) {
+    $activeTab = 'general';
+}
 // Backwards compat: map old tab names to new consolidated tabs
-if (in_array($activeTab, ['remote', 'offsite', 'storage'])) {
+if ($isAdminSettings && in_array($activeTab, ['remote', 'offsite', 'storage'])) {
     // Storage moved to /storage-locations
     $section = $_GET['section'] ?? '';
     if ($activeTab === 'offsite') $section = 's3';
@@ -14,8 +18,11 @@ if ($activeTab === 'updates') { $updatesSection = $updatesSection ?? ($_GET['sec
 
 <!-- Tab Navigation -->
 <?php
-$updateService = new \BBS\Services\UpdateService();
-$updateAvailable = $updateService->isUpdateAvailable();
+$updateAvailable = false;
+if ($isAdminSettings) {
+    $updateService = new \BBS\Services\UpdateService();
+    $updateAvailable = $updateService->isUpdateAvailable();
+}
 ?>
 <ul class="nav nav-pills client-tabs mb-0 flex-wrap">
     <li class="nav-item">
@@ -24,13 +31,14 @@ $updateAvailable = $updateService->isUpdateAvailable();
         </a>
     </li>
     <li class="nav-item">
-        <a class="nav-link <?= $activeTab === 'notifications' ? 'active' : '' ?>" href="/settings?tab=notifications">
-            <i class="bi bi-envelope me-1"></i><span class="tab-label"><span class="d-none d-sm-inline">Email Settings</span><span class="d-sm-none">Email</span></span>
-        </a>
-    </li>
-    <li class="nav-item">
         <a class="nav-link <?= $activeTab === 'push' ? 'active' : '' ?>" href="/settings?tab=push">
             <i class="bi bi-megaphone me-1"></i><span class="tab-label"><span class="d-none d-sm-inline">Push Notifications</span><span class="d-sm-none">Push</span></span>
+        </a>
+    </li>
+    <?php if ($isAdminSettings): ?>
+    <li class="nav-item">
+        <a class="nav-link <?= $activeTab === 'notifications' ? 'active' : '' ?>" href="/settings?tab=notifications">
+            <i class="bi bi-envelope me-1"></i><span class="tab-label"><span class="d-none d-sm-inline">Email Settings</span><span class="d-sm-none">Email</span></span>
         </a>
     </li>
     <li class="nav-item">
@@ -66,11 +74,55 @@ $updateAvailable = $updateService->isUpdateAvailable();
             <i class="bi bi-hdd-stack me-1"></i><span class="tab-label">Storage</span>
         </a>
     </li>
+    <?php endif; ?>
 </ul>
 <div class="client-tab-content border rounded-bottom p-4 mb-4 shadow-sm">
 
 <!-- General Tab -->
 <?php if ($activeTab === 'general'): ?>
+<?php if (!$isAdminSettings): ?>
+<div class="row g-4">
+    <div class="col-lg-8">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header fw-semibold">
+                <i class="bi bi-shield-lock me-1"></i> Two-Factor Authentication
+            </div>
+            <div class="card-body">
+                <?php if (!empty($twoFactorEnabled)): ?>
+                    <div class="d-flex align-items-center gap-2 mb-3">
+                        <span class="badge bg-success"><i class="bi bi-shield-check me-1"></i>Enabled</span>
+                        <span class="text-muted small"><?= (int) ($remainingCodes ?? 0) ?> recovery codes remaining</span>
+                    </div>
+                    <form method="POST" action="/profile/2fa/regenerate-codes" class="d-inline">
+                        <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
+                        <button type="submit" class="btn btn-sm btn-outline-secondary">
+                            <i class="bi bi-arrow-clockwise me-1"></i>Regenerate Recovery Codes
+                        </button>
+                    </form>
+                    <form method="POST" action="/profile/2fa/disable" class="mt-3" data-confirm="Disable two-factor authentication for your account?" data-confirm-danger>
+                        <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
+                        <label class="form-label small fw-semibold">Current Password</label>
+                        <div class="input-group" style="max-width: 420px;">
+                            <input type="password" class="form-control" name="password" required>
+                            <button type="submit" class="btn btn-outline-danger">
+                                <i class="bi bi-shield-x me-1"></i>Disable 2FA
+                            </button>
+                        </div>
+                    </form>
+                <?php else: ?>
+                    <p class="text-muted small mb-3">Protect your account with an authenticator app.</p>
+                    <form method="POST" action="/profile/2fa/setup">
+                        <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
+                        <button type="submit" class="btn btn-sm btn-primary">
+                            <i class="bi bi-shield-check me-1"></i>Enable 2FA
+                        </button>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+<?php else: ?>
 <form method="POST" action="/settings">
     <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
     <input type="hidden" name="_tab" value="general">
@@ -286,6 +338,7 @@ $updateAvailable = $updateService->isUpdateAvailable();
     </div>
 </form>
 <?php endif; ?>
+<?php endif; ?>
 
 <!-- Email Settings Tab -->
 <?php if ($activeTab === 'notifications'): ?>
@@ -471,7 +524,14 @@ $eventColors = [
     'storage_low' => 'warning',
     'missed_schedule' => 'warning',
 ];
-$notifServices = $this->db->fetchAll("SELECT * FROM notification_services ORDER BY name ASC");
+if ($isAdminSettings) {
+    $notifServices = $this->db->fetchAll("SELECT * FROM notification_services WHERE user_id IS NULL ORDER BY name ASC");
+} else {
+    $notifServices = $this->db->fetchAll(
+        "SELECT * FROM notification_services WHERE user_id = ? ORDER BY name ASC",
+        [(int) ($_SESSION['user_id'] ?? 0)]
+    );
+}
 foreach ($notifServices as &$ns) {
     $ns['events'] = json_decode($ns['events'] ?? '{}', true) ?: [];
 }

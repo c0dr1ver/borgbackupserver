@@ -377,7 +377,7 @@ $isAdmin = $this->isAdmin();
         <?php endif; ?>
     </div>
 
-    <?php if ($isAdmin): ?>
+    <?php if (($canMaintainRepos ?? $isAdmin)): ?>
     <!-- Maintenance Actions (Right) -->
     <div class="col-lg-6">
         <div class="card border-0 shadow-sm">

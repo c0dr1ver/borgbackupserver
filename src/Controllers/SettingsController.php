@@ -3,12 +3,19 @@
 namespace BBS\Controllers;
 
 use BBS\Core\Controller;
+use BBS\Services\TwoFactorService;
 
 class SettingsController extends Controller
 {
     public function index(): void
     {
-        $this->requireAdmin();
+        $this->requireAuth();
+
+        $isAdmin = $this->isAdmin();
+        $activeTab = $_GET['tab'] ?? 'general';
+        if (!$isAdmin && !in_array($activeTab, ['general', 'push'], true)) {
+            $this->redirect('/settings?tab=general');
+        }
 
         $settings = [];
         $rows = $this->db->fetchAll("SELECT `key`, `value` FROM settings");
@@ -16,16 +23,16 @@ class SettingsController extends Controller
             $settings[$row['key']] = $row['value'];
         }
 
-        $templates = $this->db->fetchAll("SELECT * FROM backup_templates ORDER BY name");
+        $templates = $isAdmin ? $this->db->fetchAll("SELECT * FROM backup_templates ORDER BY name") : [];
 
-        $oidcUsers = $this->db->fetchAll("SELECT id, username, email, role FROM users ORDER BY username");
+        $oidcUsers = $isAdmin ? $this->db->fetchAll("SELECT id, username, email, role FROM users ORDER BY username") : [];
 
-        $apiTokens = $this->db->fetchAll("
+        $apiTokens = $isAdmin ? $this->db->fetchAll("
             SELECT t.id, t.name, t.created_at, t.last_used_at, u.username
             FROM api_tokens t
             JOIN users u ON u.id = t.user_id
             ORDER BY t.created_at
-        ");
+        ") : [];
 
         // SMTP-not-configured warning (#249): if any email_on_* toggle is on
         // but Mailer can't actually send, the user thinks emails are firing
@@ -37,8 +44,9 @@ class SettingsController extends Controller
                 break;
             }
         }
-        $smtpReady = (new \BBS\Services\Mailer())->isEnabled();
+        $smtpReady = $isAdmin && (new \BBS\Services\Mailer())->isEnabled();
         $smtpWarning = $emailToggleEnabled && !$smtpReady;
+        $twoFactor = new TwoFactorService();
 
         $this->view('settings/index', [
             'pageTitle' => 'Settings',
@@ -47,6 +55,11 @@ class SettingsController extends Controller
             'apiTokens' => $apiTokens,
             'oidcUsers' => $oidcUsers,
             'smtpWarning' => $smtpWarning,
+            'isAdminSettings' => $isAdmin,
+            'twoFactorEnabled' => $twoFactor->isEnabled((int) $_SESSION['user_id']),
+            'remainingCodes' => $twoFactor->isEnabled((int) $_SESSION['user_id'])
+                ? $twoFactor->getRemainingRecoveryCodeCount((int) $_SESSION['user_id'])
+                : 0,
         ]);
     }
 
@@ -101,8 +114,13 @@ class SettingsController extends Controller
 
     public function update(): void
     {
-        $this->requireAdmin();
+        $this->requireAuth();
         $this->verifyCsrf();
+
+        if (!$this->isAdmin()) {
+            $this->flash('danger', 'Only administrators can update system settings.');
+            $this->redirect('/settings?tab=general');
+        }
 
         $allowed = ['max_queue', 'server_host', 'ssh_port', 'agent_poll_interval', 'stall_timeout_minutes', 'session_timeout_hours', 'default_theme', 'smtp_host', 'smtp_port', 'smtp_user', 'smtp_secure', 'smtp_from', 'notification_retention_days', 'storage_alert_threshold', 'apprise_urls', 'self_backup_retention', 'auto_retry_max_attempts', 'agent_offline_notify_minutes'];
 

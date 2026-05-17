@@ -55,7 +55,7 @@ class NotificationServiceController extends Controller
 
     public function store(): void
     {
-        $this->requireAdmin();
+        $this->requireAuth();
         $this->verifyCsrf();
 
         $name = trim($_POST['name'] ?? '');
@@ -78,6 +78,7 @@ class NotificationServiceController extends Controller
             'name' => $name,
             'service_type' => $serviceType,
             'apprise_url' => $appriseUrl,
+            'user_id' => $this->isAdmin() ? null : (int) $_SESSION['user_id'],
             'enabled' => 1,
             'events' => json_encode($events),
         ]);
@@ -88,10 +89,10 @@ class NotificationServiceController extends Controller
 
     public function update(int $id): void
     {
-        $this->requireAdmin();
+        $this->requireAuth();
         $this->verifyCsrf();
 
-        $service = $this->db->fetchOne("SELECT id FROM notification_services WHERE id = ?", [$id]);
+        $service = $this->getScopedService($id);
         if (!$service) {
             $this->flash('danger', 'Service not found.');
             $this->redirect('/settings?tab=push');
@@ -126,10 +127,10 @@ class NotificationServiceController extends Controller
 
     public function delete(int $id): void
     {
-        $this->requireAdmin();
+        $this->requireAuth();
         $this->verifyCsrf();
 
-        $service = $this->db->fetchOne("SELECT name FROM notification_services WHERE id = ?", [$id]);
+        $service = $this->getScopedService($id);
         if (!$service) {
             $this->flash('danger', 'Service not found.');
             $this->redirect('/settings?tab=push');
@@ -143,10 +144,10 @@ class NotificationServiceController extends Controller
 
     public function toggle(int $id): void
     {
-        $this->requireAdmin();
+        $this->requireAuth();
         $this->verifyCsrf();
 
-        $service = $this->db->fetchOne("SELECT enabled FROM notification_services WHERE id = ?", [$id]);
+        $service = $this->getScopedService($id);
         if (!$service) {
             $this->flash('danger', 'Service not found.');
             $this->redirect('/settings?tab=push');
@@ -160,10 +161,10 @@ class NotificationServiceController extends Controller
 
     public function test(int $id): void
     {
-        $this->requireAdmin();
+        $this->requireAuth();
         $this->verifyCsrf();
 
-        $service = $this->db->fetchOne("SELECT * FROM notification_services WHERE id = ?", [$id]);
+        $service = $this->getScopedService($id);
         if (!$service) {
             $this->json(['success' => false, 'error' => 'Service not found']);
             return;
@@ -194,10 +195,10 @@ class NotificationServiceController extends Controller
 
     public function duplicate(int $id): void
     {
-        $this->requireAdmin();
+        $this->requireAuth();
         $this->verifyCsrf();
 
-        $service = $this->db->fetchOne("SELECT * FROM notification_services WHERE id = ?", [$id]);
+        $service = $this->getScopedService($id);
         if (!$service) {
             $this->flash('danger', 'Service not found.');
             $this->redirect('/settings?tab=push');
@@ -207,6 +208,7 @@ class NotificationServiceController extends Controller
             'name' => $service['name'] . ' (copy)',
             'service_type' => $service['service_type'],
             'apprise_url' => $service['apprise_url'],
+            'user_id' => $this->isAdmin() ? null : (int) $_SESSION['user_id'],
             'enabled' => 0,
             'events' => $service['events'],
         ]);
@@ -226,5 +228,17 @@ class NotificationServiceController extends Controller
     private function getServiceName(string $type): string
     {
         return $this->serviceNames[strtolower($type)] ?? ucfirst($type);
+    }
+
+    private function getScopedService(int $id): ?array
+    {
+        if ($this->isAdmin()) {
+            return $this->db->fetchOne("SELECT * FROM notification_services WHERE id = ? AND user_id IS NULL", [$id]) ?: null;
+        }
+
+        return $this->db->fetchOne(
+            "SELECT * FROM notification_services WHERE id = ? AND user_id = ?",
+            [$id, (int) $_SESSION['user_id']]
+        ) ?: null;
     }
 }

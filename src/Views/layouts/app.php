@@ -181,12 +181,14 @@
                         <span class="small">Storage</span>
                     </a>
                 </li>
+                <?php endif; ?>
                 <li class="nav-item">
                     <a href="/settings" class="nav-link sidebar-link <?= ($pageTitle ?? '') === 'Settings' ? 'active' : '' ?>">
                         <i class="bi bi-gear d-block mb-1 fs-4"></i>
                         <span class="small">Settings</span>
                     </a>
                 </li>
+                <?php if (($_SESSION['user_role'] ?? '') === 'admin'): ?>
                 <li class="nav-item">
                     <a href="/users" class="nav-link sidebar-link <?= str_contains($pageTitle ?? '', 'User') ? 'active' : '' ?>">
                         <i class="bi bi-people d-block mb-1 fs-4"></i>
@@ -246,12 +248,10 @@
             <i class="bi bi-clock-history"></i>
             <span>Queue</span>
         </a>
-        <?php if ($isAdmin): ?>
         <a href="/settings" class="mobile-nav-item <?= $pt === 'Settings' ? 'active' : '' ?>">
             <i class="bi bi-gear"></i>
             <span>Settings</span>
         </a>
-        <?php endif; ?>
         <button type="button" class="mobile-nav-item <?= $moreActive ? 'active' : '' ?>"
                 data-bs-toggle="offcanvas" data-bs-target="#mobileMoreMenu" aria-controls="mobileMoreMenu">
             <i class="bi bi-three-dots"></i>
@@ -281,6 +281,9 @@
                     <i class="bi bi-hdd-stack fs-5 me-3"></i>Storage
                 </a>
                 <?php endif; ?>
+                <a href="/settings" class="list-group-item list-group-item-action d-flex align-items-center <?= $pt === 'Settings' ? 'active' : '' ?>">
+                    <i class="bi bi-gear fs-5 me-3"></i>Settings
+                </a>
                 <a href="/logout" class="list-group-item list-group-item-action d-flex align-items-center text-danger">
                     <i class="bi bi-box-arrow-right fs-5 me-3"></i>Logout
                 </a>

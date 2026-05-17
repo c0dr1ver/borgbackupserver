@@ -372,6 +372,7 @@ CREATE TABLE notifications (
 
 CREATE TABLE notification_services (
     id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT DEFAULT NULL,
     name VARCHAR(100) NOT NULL,
     service_type VARCHAR(50) NOT NULL,
     apprise_url TEXT NOT NULL,
@@ -380,6 +381,8 @@ CREATE TABLE notification_services (
     last_used_at DATETIME DEFAULT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user_id (user_id),
     INDEX idx_enabled (enabled)
 ) ENGINE=InnoDB;
 

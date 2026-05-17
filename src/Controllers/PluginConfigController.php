@@ -3,6 +3,7 @@
 namespace BBS\Controllers;
 
 use BBS\Core\Controller;
+use BBS\Services\PermissionService;
 use BBS\Services\PluginManager;
 use BBS\Services\S3SyncService;
 
@@ -11,7 +12,7 @@ class PluginConfigController extends Controller
     private function getAgent(int $id): ?array
     {
         $agent = $this->db->fetchOne("SELECT * FROM agents WHERE id = ?", [$id]);
-        if (!$agent || (!$this->isAdmin() && $agent['user_id'] != $_SESSION['user_id'])) {
+        if (!$agent || !$this->canAccessAgent($id)) {
             return null;
         }
         return $agent;
@@ -30,6 +31,7 @@ class PluginConfigController extends Controller
             $this->flash('danger', 'Access denied.');
             $this->redirect('/clients');
         }
+        $this->requirePermission(PermissionService::MANAGE_PLANS, $id);
 
         $pluginId = (int) ($_POST['plugin_id'] ?? 0);
         $name = trim($_POST['name'] ?? '');
@@ -70,6 +72,7 @@ class PluginConfigController extends Controller
             $this->flash('danger', 'Access denied.');
             $this->redirect('/clients');
         }
+        $this->requirePermission(PermissionService::MANAGE_PLANS, $id);
 
         $name = trim($_POST['name'] ?? '');
         $config = $_POST['plugin_config'] ?? [];
@@ -99,6 +102,7 @@ class PluginConfigController extends Controller
             $this->flash('danger', 'Access denied.');
             $this->redirect('/clients');
         }
+        $this->requirePermission(PermissionService::MANAGE_PLANS, $id);
 
         // Check if this S3 config is in use by any repository
         $inUse = $this->db->fetchOne("
@@ -133,6 +137,9 @@ class PluginConfigController extends Controller
 
         if (!$this->getAgent($id)) {
             $this->json(['error' => 'Access denied'], 403);
+        }
+        if (!$this->hasPermission(PermissionService::MANAGE_PLANS, $id)) {
+            $this->json(['error' => 'Permission denied'], 403);
         }
 
         // Check if this is an S3 plugin config — test runs server-side (rclone is on the server)

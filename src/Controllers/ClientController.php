@@ -486,9 +486,18 @@ class ClientController extends Controller
             's3Orphans' => $s3Orphans,
             's3PluginConfigId' => $s3PluginConfigId,
             'globalS3Configured' => $globalS3Configured,
-            'remoteSshConfigs' => (new \BBS\Services\RemoteSshService())->getAll(),
-            'storageLocations' => $this->db->fetchAll("SELECT * FROM storage_locations ORDER BY is_default DESC, label"),
+            'remoteSshConfigs' => $this->hasPermission(PermissionService::MANAGE_REPOS, $id)
+                ? (new \BBS\Services\RemoteSshService())->getAll()
+                : [],
+            'storageLocations' => $this->hasPermission(PermissionService::MANAGE_REPOS, $id)
+                ? $this->db->fetchAll("SELECT * FROM storage_locations ORDER BY is_default DESC, label")
+                : [],
             'clickhouseAvailable' => $clickhouseAvailable,
+            'canRunBackups' => $this->hasPermission(PermissionService::TRIGGER_BACKUP, $id),
+            'canManageRepos' => $this->hasPermission(PermissionService::MANAGE_REPOS, $id),
+            'canManagePlans' => $this->hasPermission(PermissionService::MANAGE_PLANS, $id),
+            'canRestore' => $this->hasPermission(PermissionService::RESTORE, $id),
+            'canMaintainRepos' => $this->hasPermission(PermissionService::REPO_MAINTENANCE, $id),
         ]);
     }
 
@@ -643,6 +652,9 @@ class ClientController extends Controller
         if (!$agent) {
             $this->json(['error' => 'Client not found'], 404);
         }
+        if (!$this->hasPermission(PermissionService::RESTORE, $id)) {
+            $this->json(['error' => 'Restore permission required'], 403);
+        }
 
         $ch = \BBS\Core\ClickHouse::getInstance();
         $search = trim($_GET['search'] ?? '');
@@ -693,6 +705,9 @@ class ClientController extends Controller
         $agent = $this->getAgent($id);
         if (!$agent) {
             $this->json(['error' => 'Client not found'], 404);
+        }
+        if (!$this->hasPermission(PermissionService::RESTORE, $id)) {
+            $this->json(['error' => 'Restore permission required'], 403);
         }
 
         $ch = \BBS\Core\ClickHouse::getInstance();
@@ -750,6 +765,9 @@ class ClientController extends Controller
         $agent = $this->getAgent($id);
         if (!$agent) {
             $this->json(['error' => 'Client not found'], 404);
+        }
+        if (!$this->hasPermission(PermissionService::RESTORE, $id)) {
+            $this->json(['error' => 'Restore permission required'], 403);
         }
 
         $search = trim($_GET['q'] ?? '');
@@ -1598,7 +1616,7 @@ class ClientController extends Controller
 
     public function update(int $id): void
     {
-        $this->requireAuth();
+        $this->requireAdmin();
         $this->verifyCsrf();
 
         $agent = $this->getAgent($id);
@@ -1738,7 +1756,7 @@ class ClientController extends Controller
 
     public function updateBorg(int $id): void
     {
-        $this->requireAuth();
+        $this->requireAdmin();
         $this->verifyCsrf();
 
         $agent = $this->getAgent($id);
@@ -1767,7 +1785,7 @@ class ClientController extends Controller
 
     public function updateAgent(int $id): void
     {
-        $this->requireAuth();
+        $this->requireAdmin();
         $this->verifyCsrf();
 
         $agent = $this->getAgent($id);

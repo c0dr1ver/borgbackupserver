@@ -59,51 +59,52 @@
         </div>
     </div>
 
-    <!-- Owned Clients (hidden for admins) -->
+    <!-- Owned Clients and Permissions (hidden for admins) -->
     <div class="card border-0 shadow-sm mb-4" id="clientAccessCard" style="<?= $user['role'] === 'admin' ? 'display:none' : '' ?>">
         <div class="card-header border-0">
-            <h6 class="mb-0"><i class="bi bi-pc-display me-2"></i>Owned Clients</h6>
+            <h6 class="mb-0"><i class="bi bi-pc-display me-2"></i>Client Access</h6>
         </div>
         <div class="card-body">
-            <p class="text-muted small mb-2">Assigned clients grant rights to run backups, manage backup plans, and restore data. Repository creation, import, deletion, and maintenance remain admin-only.</p>
+            <p class="text-muted small mb-2">Only clients currently owned by this user are listed here. Change client ownership from the client edit screen; this page only grants action permissions.</p>
             <div id="specificClientsDiv">
                 <?php if (empty($allAgents)): ?>
-                <p class="text-muted">No clients available</p>
+                <p class="text-muted">No clients are assigned to this user.</p>
                 <?php else: ?>
                 <div class="table-responsive">
                     <table class="table table-sm table-hover align-middle mb-0">
                         <thead class="table-light">
                             <tr>
                                 <th>Client</th>
-                                <th class="text-center" style="width: 120px;"><small>Owner</small></th>
+                                <?php foreach ($allPermissions as $perm): ?>
+                                <th class="text-center" style="width: 96px;"><small><?= htmlspecialchars($permissionLabels[$perm] ?? $perm) ?></small></th>
+                                <?php endforeach; ?>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($allAgents as $agent): ?>
-                            <?php $isAssigned = in_array($agent['id'], $userAgentIds); ?>
-                            <tr class="<?= $isAssigned ? '' : 'table-light' ?>" data-agent-id="<?= $agent['id'] ?>">
+                            <?php
+                            $agentId = (int) $agent['id'];
+                            $ownerLabel = $agent['owner_name'] ?? 'No owner';
+                            ?>
+                            <tr data-agent-id="<?= $agent['id'] ?>">
                                 <td>
-                                    <span class="client-name <?= $isAssigned ? 'fw-semibold' : 'text-muted' ?>">
+                                    <span class="client-name fw-semibold">
                                         <?= htmlspecialchars($agent['name']) ?>
                                     </span>
+                                    <div class="text-muted small">Owner: <?= htmlspecialchars($ownerLabel) ?></div>
                                 </td>
+                                <?php foreach ($allPermissions as $perm): ?>
                                 <td class="text-center">
-                                    <input class="form-check-input client-checkbox" type="checkbox" name="agents[]"
-                                        value="<?= $agent['id'] ?>" id="agent_<?= $agent['id'] ?>"
-                                        data-agent-id="<?= $agent['id'] ?>"
-                                        <?= $isAssigned ? 'checked' : '' ?>>
+                                    <input class="form-check-input permission-checkbox" type="checkbox"
+                                        name="permissions[<?= $agentId ?>][<?= htmlspecialchars($perm) ?>]"
+                                        value="1"
+                                        data-agent-id="<?= $agentId ?>"
+                                        <?= !empty($permissionData[$agentId][$perm]) ? 'checked' : '' ?>>
                                 </td>
+                                <?php endforeach; ?>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>
-                        <tfoot class="table-light">
-                            <tr>
-                                <td class="text-end small text-muted">Select all:</td>
-                                <td class="text-center">
-                                    <input type="checkbox" class="form-check-input" id="selectAllClients" title="Select/Deselect All">
-                                </td>
-                            </tr>
-                        </tfoot>
                     </table>
                 </div>
                 <?php endif; ?>
@@ -151,55 +152,11 @@
 document.addEventListener('DOMContentLoaded', function() {
     const roleSelect = document.getElementById('roleSelect');
     const clientAccessCard = document.getElementById('clientAccessCard');
-    const selectAllClients = document.getElementById('selectAllClients');
 
     // Toggle client access based on role
     roleSelect.addEventListener('change', function() {
         const isAdmin = this.value === 'admin';
         clientAccessCard.style.display = isAdmin ? 'none' : '';
     });
-
-    // Handle client checkbox changes.
-    document.querySelectorAll('.client-checkbox').forEach(function(checkbox) {
-        checkbox.addEventListener('change', function() {
-            const row = this.closest('tr');
-            const clientName = row.querySelector('.client-name');
-
-            if (this.checked) {
-                row.classList.remove('table-light');
-                clientName.classList.add('fw-semibold');
-                clientName.classList.remove('text-muted');
-            } else {
-                row.classList.add('table-light');
-                clientName.classList.remove('fw-semibold');
-                clientName.classList.add('text-muted');
-            }
-            updateSelectAllState();
-        });
-    });
-
-    // Select all clients checkbox
-    if (selectAllClients) {
-        selectAllClients.addEventListener('change', function() {
-            document.querySelectorAll('.client-checkbox').forEach(cb => {
-                if (cb.checked !== this.checked) {
-                    cb.checked = this.checked;
-                    cb.dispatchEvent(new Event('change'));
-                }
-            });
-        });
-    }
-
-    // Update select-all checkbox state based on individual checkboxes
-    function updateSelectAllState() {
-        if (!selectAllClients) return;
-        const allCheckboxes = document.querySelectorAll('.client-checkbox');
-        const checkedCount = document.querySelectorAll('.client-checkbox:checked').length;
-        selectAllClients.checked = checkedCount === allCheckboxes.length;
-        selectAllClients.indeterminate = checkedCount > 0 && checkedCount < allCheckboxes.length;
-    }
-
-    // Initial state update
-    updateSelectAllState();
 });
 </script>

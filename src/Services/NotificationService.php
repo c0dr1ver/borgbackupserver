@@ -45,7 +45,7 @@ class NotificationService
                 // Still fire email/Apprise (those have their own per-event
                 // toggles), but skip the in-app notification center record.
                 $this->sendEmailIfEnabled($type, $message);
-                $this->sendAppriseIfEnabled($type, $message, $agentId);
+                $this->sendAppriseIfEnabled($type, $message, $agentId, $userId);
                 return;
             }
         }
@@ -98,7 +98,7 @@ class NotificationService
         // periodic re-pings. Configured-but-broken Apprise URLs would
         // otherwise log a delivery failure on every escalation tick.
         if ($isNew) {
-            $this->sendAppriseIfEnabled($type, $message, $agentId);
+            $this->sendAppriseIfEnabled($type, $message, $agentId, $userId);
         }
 
         // Email fires on first occurrence; on every Nth occurrence
@@ -210,7 +210,7 @@ class NotificationService
              . "-- Borg Backup Server";
     }
 
-    private function sendAppriseIfEnabled(string $type, string $message, ?int $agentId = null): void
+    private function sendAppriseIfEnabled(string $type, string $message, ?int $agentId = null, ?int $userId = null): void
     {
         try {
             $apprise = new AppriseService();
@@ -218,7 +218,7 @@ class NotificationService
             $title = '[BBS] ' . ($labels[$type] ?? ucfirst($type));
 
             // Use the new per-service event filtering
-            $apprise->sendForEvent($type, $title, $message, $agentId);
+            $apprise->sendForEvent($type, $title, $message, $agentId, $userId);
         } catch (\Exception $e) {
             // Don't let Apprise failures break notification flow
         }

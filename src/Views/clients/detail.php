@@ -1,6 +1,11 @@
 <?php
 $tab = $_GET['tab'] ?? 'status';
 $isAdmin = $this->isAdmin();
+$canRunBackups = $canRunBackups ?? $isAdmin;
+$canManageRepos = $canManageRepos ?? $isAdmin;
+$canManagePlans = $canManagePlans ?? $isAdmin;
+$canRestore = $canRestore ?? $isAdmin;
+$canMaintainRepos = $canMaintainRepos ?? $isAdmin;
 
 // Detect server's agent version from the bundled bbs-agent.py
 $serverAgentVersion = null;
@@ -39,9 +44,11 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
                         <i class="bi bi-display me-2 text-primary"></i><?= htmlspecialchars($agent['name']) ?>
                     </h3>
                     <span class="badge bg-<?= $statusClass ?>" id="agent-status-badge"><?= ucfirst($agent['status']) ?></span>
+                    <?php if ($isAdmin): ?>
                     <button class="btn btn-sm btn-outline-secondary border-0" data-bs-toggle="modal" data-bs-target="#editClientModal" title="Edit client">
                         <i class="bi bi-pencil"></i>
                     </button>
+                    <?php endif; ?>
                 </div>
                 <div class="text-muted d-flex flex-wrap gap-3 align-items-center" style="font-size:.8rem;">
                     <?php if ($agent['hostname']): ?>
@@ -55,7 +62,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
                     <?php endif; ?>
                     <span id="agent-version-wrapper" class="d-inline">
                     <?php if ($agent['agent_version']): ?>
-                        <?php if ($agentNeedsUpdate): ?>
+                        <?php if ($isAdmin && $agentNeedsUpdate): ?>
                             <form method="POST" action="/clients/<?= $agent['id'] ?>/update-agent" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
                                 <button type="submit" class="btn btn-link text-warning p-0 text-decoration-none" style="font-size: inherit;" title="Update agent to v<?= htmlspecialchars($serverAgentVersion) ?>" data-confirm="Queue an agent update to v<?= htmlspecialchars($serverAgentVersion) ?>?">
@@ -66,7 +73,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
                             <i class="bi bi-box me-1"></i>Agent v<?= htmlspecialchars($agent['agent_version']) ?>
                         <?php endif; ?>
                     <?php endif; ?>
-                    </span><?php if ($agent['borg_version']): ?>
+                    </span><?php if ($isAdmin && $agent['borg_version']): ?>
                         <span>
                             <form method="POST" action="/clients/<?= $agent['id'] ?>/update-borg" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
@@ -163,6 +170,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
             </div>
         </div>
 
+    <?php if ($isAdmin): ?>
     <!-- Edit Client Modal -->
     <div class="modal fade" id="editClientModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
@@ -211,6 +219,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
             </div>
         </div>
     </div>
+    <?php endif; ?>
 </div>
 
 <!-- Sub-tabs -->
@@ -235,11 +244,13 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
             <i class="bi bi-calendar-event me-1"></i><span class="tab-label">Plans</span>
         </a>
     </li>
+    <?php if ($canRestore): ?>
     <li class="nav-item">
         <a class="nav-link <?= $tab === 'restore' ? 'active' : '' ?>" href="?tab=restore">
             <i class="bi bi-arrow-counterclockwise me-1"></i><span class="tab-label">Restore</span>
         </a>
     </li>
+    <?php endif; ?>
     <?php if ($this->isAdmin()): ?>
     <li class="nav-item">
         <a class="nav-link <?= $tab === 'install' ? 'active' : '' ?>" href="?tab=install">
@@ -293,19 +304,21 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
         <div class="col-md-3">
             <div class="card border-0 shadow-sm h-100 metric-card-blue">
                 <div class="card-body d-flex align-items-center position-relative">
-                    <?php if ($nextBackup && $nextBackup['plan_id']): ?>
+                    <?php if ($nextBackup && $nextBackup['plan_id'] && ($canRunBackups || $canManagePlans)): ?>
                     <div class="dropdown position-absolute top-0 end-0 mt-2 me-2" style="z-index:2147483647;">
                         <button class="btn btn-sm btn-link text-muted p-1 border-0" type="button" data-bs-toggle="dropdown" data-bs-strategy="fixed">
                             <i class="bi bi-three-dots-vertical"></i>
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end" style="z-index:2147483647;">
                             <li>
+                                <?php if ($canRunBackups): ?>
                                 <form method="POST" action="/plans/<?= $nextBackup['plan_id'] ?>/trigger">
                                     <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
                                     <button type="submit" class="dropdown-item"><i class="bi bi-play-fill text-success me-2"></i>Run Now</button>
                                 </form>
+                                <?php endif; ?>
                             </li>
-                            <?php if ($nextBackup['schedule_id'] ?? null): ?>
+                            <?php if ($canManagePlans && ($nextBackup['schedule_id'] ?? null)): ?>
                             <li>
                                 <form method="POST" action="/schedules/<?= $nextBackup['schedule_id'] ?>/toggle">
                                     <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
@@ -313,7 +326,9 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
                                 </form>
                             </li>
                             <?php endif; ?>
+                            <?php if ($canManagePlans): ?>
                             <li><a class="dropdown-item" href="?tab=schedules"><i class="bi bi-pencil text-primary me-2"></i>Edit</a></li>
+                            <?php endif; ?>
                         </ul>
                     </div>
                     <?php elseif ($pausedCount > 0): ?>
@@ -649,6 +664,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Verifying...';
 
         var formData = new URLSearchParams();
+        formData.append('csrf_token', '<?= $this->csrfToken() ?>');
         formData.append('agent_id', '<?= $agent['id'] ?>');
         formData.append('name', document.getElementById('importName').value);
         formData.append('passphrase', document.getElementById('importPassphrase').value);
@@ -721,13 +737,14 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
         ?>
         <div class="col-md-6 col-lg-4">
             <div class="card border-0 shadow-sm h-100 repo-card position-relative" style="cursor: pointer; overflow: visible;" onclick="window.location='/clients/<?= $agent['id'] ?>/repo/<?= $repo['id'] ?>'">
-                <?php if ($isAdmin): ?>
+                <?php if ($canManageRepos || $canMaintainRepos): ?>
                 <!-- Maintenance menu in upper right -->
                 <div class="position-absolute dropdown" style="top: 6px; right: 6px; z-index: 10;" onclick="event.stopPropagation()">
                     <button class="btn btn-sm btn-link text-muted p-1" type="button" data-bs-toggle="dropdown" data-bs-strategy="fixed" aria-expanded="false" title="Actions">
                         <i class="bi bi-three-dots-vertical"></i>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end">
+                        <?php if ($canMaintainRepos): ?>
                         <li>
                             <form method="POST" action="/repositories/<?= $repo['id'] ?>/maintenance">
                                 <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
@@ -756,6 +773,8 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
                                 <button type="submit" class="dropdown-item"><i class="bi bi-unlock me-2 text-danger"></i>Break Lock</button>
                             </form>
                         </li>
+                        <?php endif; ?>
+                        <?php if ($canManageRepos): ?>
                         <li><hr class="dropdown-divider"></li>
                         <li>
                             <?php if ($deleteBlocked): ?>
@@ -769,6 +788,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
                                 </form>
                             <?php endif; ?>
                         </li>
+                        <?php endif; ?>
                     </ul>
                 </div>
                 <?php endif; ?>
@@ -807,7 +827,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
             </div>
         </div>
         <?php endforeach; ?>
-        <?php if ($isAdmin): ?>
+        <?php if ($canManageRepos): ?>
         <div class="col-md-6 col-lg-4">
             <div class="card border-0 shadow-sm h-100 card-dashed" onclick="showCreateRepo()">
                 <div class="card-body d-flex flex-column align-items-center justify-content-center text-muted p-4">
@@ -828,7 +848,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
     </div>
 
     <!-- Delete Repo Modals (for repos with S3 sync) -->
-    <?php if ($isAdmin): ?>
+    <?php if ($canManageRepos): ?>
     <?php foreach ($repositories as $repo): ?>
     <?php if (isset($s3SyncByRepo[$repo['id']])): ?>
     <div class="modal fade" id="deleteRepoModal<?= $repo['id'] ?>" tabindex="-1" aria-hidden="true">
@@ -870,7 +890,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
         <div class="card border-0 shadow-sm mb-4 card-dashed">
             <div class="card-body d-flex flex-column align-items-center justify-content-center text-muted py-5">
                 <i class="bi bi-archive" style="font-size:2rem;"></i>
-                <?php if ($isAdmin): ?>
+                <?php if ($canManageRepos): ?>
                 <div class="mt-2 fw-semibold">Create a Repository to get started</div>
                 <small class="mt-1 text-center" style="max-width:400px;">A repository is a virtual disk where your backup data is stored on the backup server.</small>
                 <div class="mt-3 d-flex gap-2">
@@ -879,14 +899,14 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
                 </div>
                 <?php else: ?>
                 <div class="mt-2 fw-semibold">No repositories assigned</div>
-                <small class="mt-1 text-center" style="max-width:400px;">An administrator must add repositories before backup jobs can be configured.</small>
+                <small class="mt-1 text-center" style="max-width:400px;">An administrator or a user with Manage Repos permission must add repositories before backup jobs can be configured.</small>
                 <?php endif; ?>
             </div>
         </div>
     </div>
     <?php endif; ?>
 
-    <?php if ($isAdmin): ?>
+    <?php if ($canManageRepos): ?>
     <!-- Create new repo -->
     <div id="create-repo-section" style="display:none;">
     <div class="card border-0 shadow-sm">
@@ -1248,18 +1268,21 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
         <div class="col-md-6 col-lg-4">
             <div class="card border-0 shadow-sm h-100 schedule-card" style="overflow: visible;">
                 <div class="card-body p-3 position-relative">
+                    <?php if ($canRunBackups || $canManagePlans): ?>
                     <div class="dropdown position-absolute" style="top:8px;right:8px;z-index:2147483647;">
                         <button class="btn btn-sm btn-link text-muted p-1 border-0" type="button" data-bs-toggle="dropdown" data-bs-strategy="fixed" aria-expanded="false">
                             <i class="bi bi-three-dots-vertical"></i>
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end" style="z-index:2147483647;">
                             <li>
+                                <?php if ($canRunBackups): ?>
                                 <form method="POST" action="/plans/<?= $plan['id'] ?>/trigger">
                                     <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
                                     <button type="submit" class="dropdown-item"><i class="bi bi-play-fill text-success me-2"></i>Run Now</button>
                                 </form>
+                                <?php endif; ?>
                             </li>
-                            <?php if ($plan['schedule_id']): ?>
+                            <?php if ($canManagePlans && $plan['schedule_id']): ?>
                             <li>
                                 <form method="POST" action="/schedules/<?= $plan['schedule_id'] ?>/toggle">
                                     <input type="hidden" name="csrf_token" value="<?= $this->csrfToken() ?>">
@@ -1271,6 +1294,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
                                 </form>
                             </li>
                             <?php endif; ?>
+                            <?php if ($canManagePlans): ?>
                             <li><button class="dropdown-item" type="button" data-bs-toggle="collapse" data-bs-target="#edit-plan-<?= $plan['id'] ?>"><i class="bi bi-pencil text-primary me-2"></i>Edit</button></li>
                             <li>
                                 <form method="POST" action="/plans/<?= $plan['id'] ?>/duplicate">
@@ -1285,8 +1309,10 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
                                     <button type="submit" class="dropdown-item text-danger"><i class="bi bi-trash me-2"></i>Delete</button>
                                 </form>
                             </li>
+                            <?php endif; ?>
                         </ul>
                     </div>
+                    <?php endif; ?>
                     <div class="d-flex align-items-center">
                         <div class="schedule-icon-wrap me-3 <?= $isActive ? 'schedule-active' : ($isManual ? 'schedule-manual' : 'schedule-paused') ?>">
                             <i class="bi bi-calendar-event"></i>
@@ -1309,7 +1335,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
             </div>
         </div>
         <?php endforeach; ?>
-        <?php if (!empty($repositories)): ?>
+        <?php if ($canManagePlans && !empty($repositories)): ?>
         <div class="col-md-6 col-lg-4">
             <div class="card border-0 shadow-sm h-100 schedule-card card-dashed" id="add-plan-card" onclick="showCreatePlan()">
                 <div class="card-body d-flex flex-column align-items-center justify-content-center text-muted p-4">
@@ -1321,7 +1347,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
         <?php endif; ?>
     </div>
     <?php endif; ?>
-    <?php if (empty($plans) && !empty($repositories)): ?>
+    <?php if (empty($plans) && $canManagePlans && !empty($repositories)): ?>
     <div id="add-plan-card-solo" style="cursor:pointer;" onclick="showCreatePlan()">
         <div class="card border-0 shadow-sm mb-4 card-dashed">
             <div class="card-body d-flex flex-column align-items-center justify-content-center text-muted p-4">
@@ -1658,6 +1684,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
         <option value="obfuscate,110,none">
         <option value="obfuscate,3,auto,zstd,10">
     </datalist>
+    <?php if ($canManagePlans): ?>
     <div id="create-plan-section" style="display:none;">
     <?php if (empty($repositories)): ?>
     <div class="alert alert-warning">You need to <a href="?tab=repos">create a repository</a> before adding a backup schedule.</div>
@@ -2305,6 +2332,7 @@ $sizeDisplay = $totalSize > 0 ? \BBS\Services\ServerStats::formatBytes((int) $to
     </script>
     </div><!-- /create-plan-section -->
     <?php endif; ?>
+    <?php endif; ?>
 
 <?php elseif ($tab === 'plugins'): ?>
     <h5 class="mb-3"><i class="bi bi-plug me-1"></i> Plugins</h5>
@@ -2744,6 +2772,11 @@ GRANT ALL PRIVILEGES ON DATABASE mydb TO <span id="pgUser2g">bbs_backup</span>;<
     </script>
 
 <?php elseif ($tab === 'restore'): ?>
+    <?php if (!$canRestore): ?>
+    <div class="alert alert-warning">
+        <i class="bi bi-shield-lock me-1"></i> Restore access is not enabled for your account on this client.
+    </div>
+    <?php else: ?>
     <?php
     $mysqlPluginEnabled = false;
     $pgPluginEnabled = false;
@@ -3126,6 +3159,7 @@ GRANT ALL PRIVILEGES ON DATABASE mydb TO <span id="pgUser2g">bbs_backup</span>;<
     ?>
 
     <?php endif; ?>
+    <?php endif; ?>
 
 <?php elseif ($tab === 'install'): ?>
     <h5 class="mb-3">Install Agent</h5>
@@ -3256,6 +3290,7 @@ const csrfToken = '<?= $this->csrfToken() ?>';
     const agentId = <?= (int) $agent['id'] ?>;
     const initialStatus = '<?= $agent['status'] ?>';
     const serverAgentVersion = <?= json_encode($serverAgentVersion) ?>;
+    const canAdminClients = <?= $isAdmin ? 'true' : 'false' ?>;
     const csrfToken = <?= json_encode($this->csrfToken()) ?>;
     let previousStatus = initialStatus;
     const statusMap = { online: 'success', offline: 'secondary', error: 'danger', setup: 'warning' };
@@ -3302,7 +3337,7 @@ const csrfToken = '<?= $this->csrfToken() ?>';
                 const vw = document.getElementById('agent-version-wrapper');
                 if (vw && data.agent_version) {
                     const needsUpdate = serverAgentVersion && data.agent_version !== serverAgentVersion;
-                    if (needsUpdate) {
+                    if (canAdminClients && needsUpdate) {
                         vw.innerHTML = '<form method="POST" action="/clients/' + agentId + '/update-agent" class="d-inline">' +
                             '<input type="hidden" name="csrf_token" value="' + csrfToken + '">' +
                             '<button type="submit" class="btn btn-link text-warning p-0 text-decoration-none" style="font-size: inherit;" title="Update agent to v' + serverAgentVersion + '" data-confirm="Queue an agent update to v' + serverAgentVersion + '?">' +
